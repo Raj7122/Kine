@@ -1,0 +1,62 @@
+[
+  {
+    "id": "greeting-1",
+    "input": "Hello, how are you?",
+    "gloss": ["HELLO", "WORLD"],
+    "category": "greetings"
+  },
+  {
+    "id": "greeting-2",
+    "input": "Nice to meet you",
+    "gloss": ["HELLO", "THANK_YOU"],
+    "category": "greetings"
+  },
+  {
+    "id": "thanks-1",
+    "input": "Thank you very much",
+    "gloss": ["THANK_YOU", "PLEASE"],
+    "category": "expressions"
+  },
+  {
+    "id": "thanks-2",
+    "input": "Thanks for your help",
+    "gloss": ["THANK_YOU", "HELP"],
+    "category": "expressions"
+  },
+  {
+    "id": "response-1",
+    "input": "Yes, I understand",
+    "gloss": ["YES", "THANK_YOU"],
+    "category": "responses"
+  },
+  {
+    "id": "response-2",
+    "input": "No, sorry",
+    "gloss": ["NO", "SORRY"],
+    "category": "responses"
+  },
+  {
+    "id": "request-1",
+    "input": "Please help me",
+    "gloss": ["PLEASE", "HELP"],
+    "category": "requests"
+  },
+  {
+    "id": "full-1",
+    "input": "Hello world, thank you",
+    "gloss": ["HELLO", "WORLD", "THANK_YOU"],
+    "category": "full"
+  },
+  {
+    "id": "full-2",
+    "input": "Yes please, thank you",
+    "gloss": ["YES", "PLEASE", "THANK_YOU"],
+    "category": "full"
+  },
+  {
+    "id": "full-3",
+    "input": "Hello, sorry for the trouble",
+    "gloss": ["HELLO", "SORRY", "PLEASE"],
+    "category": "full"
+  }
+]

@@ -1,0 +1,82 @@
+{
+  "HELLO": {
+    "gloss_label": "HELLO",
+    "video_url": "/avatars/hello.mp4",
+    "duration_ms": 1500,
+    "category": "greetings",
+    "metadata": {
+      "signer_id": "mock-signer-1",
+      "dialect": "ASL"
+    }
+  },
+  "WORLD": {
+    "gloss_label": "WORLD",
+    "video_url": "/avatars/world.mp4",
+    "duration_ms": 1200,
+    "category": "nouns",
+    "metadata": {
+      "signer_id": "mock-signer-1",
+      "dialect": "ASL"
+    }
+  },
+  "THANK_YOU": {
+    "gloss_label": "THANK_YOU",
+    "video_url": "/avatars/thank_you.mp4",
+    "duration_ms": 1800,
+    "category": "expressions",
+    "metadata": {
+      "signer_id": "mock-signer-1",
+      "dialect": "ASL"
+    }
+  },
+  "YES": {
+    "gloss_label": "YES",
+    "video_url": "/avatars/yes.mp4",
+    "duration_ms": 800,
+    "category": "responses",
+    "metadata": {
+      "signer_id": "mock-signer-1",
+      "dialect": "ASL"
+    }
+  },
+  "NO": {
+    "gloss_label": "NO",
+    "video_url": "/avatars/no.mp4",
+    "duration_ms": 900,
+    "category": "responses",
+    "metadata": {
+      "signer_id": "mock-signer-1",
+      "dialect": "ASL"
+    }
+  },
+  "PLEASE": {
+    "gloss_label": "PLEASE",
+    "video_url": "/avatars/please.mp4",
+    "duration_ms": 1100,
+    "category": "expressions",
+    "metadata": {
+      "signer_id": "mock-signer-1",
+      "dialect": "ASL"
+    }
+  },
+  "SORRY": {
+    "gloss_label": "SORRY",
+    "video_url": "/avatars/sorry.mp4",
+    "duration_ms": 1300,
+    "category": "expressions",
+    "metadata": {
+      "signer_id": "mock-signer-1",
+      "dialect": "ASL"
+    }
+  },
+  "HELP": {
+    "gloss_label": "HELP",
+    "video_url": "/avatars/help.mp4",
+    "duration_ms": 1000,
+    "category": "verbs",
+    "metadata": {
+      "signer_id": "mock-signer-1",
+      "dialect": "ASL"
+    }
+  }
+}
