@@ -21,8 +21,10 @@ interface AvatarPlayerProps {
 }
 
 // Determine default mode based on configuration
+// For Option B (Gemini Sandwich), default to flipbook
 function getDefaultMode(): AvatarMode {
-  if (isGenASLConfigured) return 'genasl';
+  // Option B: Use flipbook as primary, GenASL as optional upgrade
+  // GenASL requires full AWS deployment which we're skipping for hackathon
   return 'flipbook';
 }
 
@@ -271,6 +273,5 @@ export function AvatarPlayer({
   );
 }
 
-// Export hook and types for external control
+// Export hook for external control
 export { useAvatarPlayer };
-export type { AvatarMode };

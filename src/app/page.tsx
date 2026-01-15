@@ -14,7 +14,8 @@ import { SettingsModal, HistoryModal } from '@/components/modals';
 import { TRANSITION_DURATION } from '@/config/constants';
 import type { LandmarkResult } from '@/lib/mediapipe';
 import { useTranslation, type TranslationState } from '@/hooks/useTranslation';
-import { Play, Square } from 'lucide-react';
+import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
+import { Play, Square, Mic, MicOff } from 'lucide-react';
 
 export default function Home() {
   const { mode } = useAppStore();
@@ -185,14 +186,53 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
     shouldAutoPlay,
     setShouldAutoPlay,
     clearGlossSequence,
-    lastTranslation
+    lastTranslation,
+    setGlossSequence,
   } = useAppStore();
 
-  // Auto-play sequence when entering from translation
+  // Speech recognition hook - Gemini as "The Linguist"
+  const {
+    state: speechState,
+    isListening,
+    interimTranscript,
+    finalTranscript,
+    translation: speechTranslation,
+    startListening,
+    stopListening,
+    reset: resetSpeech,
+  } = useSpeechRecognition((result) => {
+    // Called when speech is translated to gloss
+    console.log('[ListeningView] Speech translated:', result.gloss);
+    setGlossSequence(result.gloss);
+
+    // Play the avatar sequence
+    setTimeout(() => {
+      // @ts-expect-error - Accessing window function for testing
+      if (window.playAvatarSequence) {
+        // @ts-expect-error - Accessing window function for testing
+        window.playAvatarSequence(result.gloss);
+        setIsPlaying(true);
+      }
+    }, 300);
+  });
+
+  // Auto-start listening when entering this view (unless auto-playing from SIGNING_MODE)
+  useEffect(() => {
+    if (!shouldAutoPlay && speechState === 'idle') {
+      console.log('[ListeningView] Starting speech recognition');
+      startListening();
+    }
+
+    return () => {
+      stopListening();
+    };
+  }, []); // Only on mount
+
+  // Auto-play sequence when entering from SIGNING_MODE translation
   useEffect(() => {
     if (shouldAutoPlay && currentGlossSequence.length > 0 && !hasAutoPlayedRef.current) {
       hasAutoPlayedRef.current = true;
-      console.log('[ListeningView] Auto-playing sequence:', currentGlossSequence);
+      console.log('[ListeningView] Auto-playing sequence from SIGNING_MODE:', currentGlossSequence);
 
       // Small delay to let component mount
       setTimeout(() => {
@@ -244,11 +284,29 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
     }
   };
 
-  // Display text - show translation result or default
-  const displayText = lastTranslation || 'Listening...';
-  const subText = lastTranslation
-    ? 'Translating to sign language...'
-    : 'Speak naturally. Your words will be translated to sign language.';
+  const handleMicToggle = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      resetSpeech();
+      startListening();
+    }
+  };
+
+  // Display text - prioritize speech input, then last translation
+  const displayText = interimTranscript || finalTranscript || speechTranslation?.spokenText || lastTranslation || 'Listening...';
+
+  // Sub text based on state
+  const getSubText = () => {
+    if (speechState === 'not_supported') return 'Speech recognition not supported in this browser';
+    if (speechState === 'error') return 'Error with speech recognition. Try again.';
+    if (speechState === 'processing') return 'Translating to sign language...';
+    if (interimTranscript) return 'Listening...';
+    if (finalTranscript || speechTranslation) return 'Translating to sign language...';
+    if (isListening) return 'Speak naturally. Your words will be translated to sign language.';
+    return 'Tap the microphone to start speaking.';
+  };
+  const subText = getSubText();
 
   return (
     <motion.div
@@ -262,16 +320,38 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
       <div className="absolute inset-0 z-10 flex flex-col items-center px-4 pt-20">
         {/* Transcription Area - Large Yellow Text */}
         <div className="w-full max-w-md text-left">
-          <h2 className="text-4xl font-bold leading-tight text-yellow-400">
-            {displayText}
-          </h2>
+          <div className="flex items-start justify-between">
+            <h2 className="flex-1 text-4xl font-bold leading-tight text-yellow-400">
+              {displayText}
+            </h2>
+            {/* Mic indicator */}
+            <button
+              onClick={handleMicToggle}
+              className={`ml-4 flex h-12 w-12 items-center justify-center rounded-full transition-colors ${
+                isListening
+                  ? 'animate-pulse bg-red-500/20 text-red-400'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+              }`}
+            >
+              {isListening ? <Mic className="h-6 w-6" /> : <MicOff className="h-6 w-6" />}
+            </button>
+          </div>
           <p className="mt-2 text-lg text-yellow-400/70">
             {subText}
           </p>
-          {currentGlossSequence.length > 0 && (
+          {/* Show gloss sequence if available */}
+          {(currentGlossSequence.length > 0 || speechTranslation?.gloss) && (
             <p className="mt-2 text-sm text-gray-500">
-              Gloss: {currentGlossSequence.join(' → ')}
+              Gloss: {(speechTranslation?.gloss || currentGlossSequence).join(' → ')}
             </p>
+          )}
+          {/* Processing indicator */}
+          {speechState === 'processing' && (
+            <div className="mt-2 flex items-center gap-2">
+              <div className="h-2 w-2 animate-bounce rounded-full bg-yellow-400" />
+              <div className="h-2 w-2 animate-bounce rounded-full bg-yellow-400" style={{ animationDelay: '0.1s' }} />
+              <div className="h-2 w-2 animate-bounce rounded-full bg-yellow-400" style={{ animationDelay: '0.2s' }} />
+            </div>
           )}
         </div>
 
