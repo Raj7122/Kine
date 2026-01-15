@@ -2,7 +2,8 @@ Kine - Technical Requirements Document (TRD)
 Target Builder: Claude Code (Cursor) / AI Agent
 Project Type: Real-Time Accessibility PWA / Mobile Web App (Android/iOS Compatible)
 Tech Stack: Next.js 14+ (App Router), TypeScript, Tailwind CSS, Supabase, Google MediaPipe (Web), Gemini 3.0 API, ElevenLabs API.
-Date: January 13, 2026
+Date: January 14, 2026
+Last Updated: January 14, 2026 (Flipbook Avatar System)
 1. System Architecture Overview
 Core Philosophy
 The application acts as a bi-directional bridge. It is "State-Driven" rather than "Page-Driven," relying on two primary modes (SIGNING_MODE vs. LISTENING_MODE) within a single dynamic view to reduce latency.
@@ -39,7 +40,7 @@ Layout Structure:
 Background Layer (Z-0): Solid Black (bg-black).
 Content Container (Z-10): A Flex column centered vertically.
 Transcription Area: Large, High-Contrast Text (text-4xl text-yellow-400 font-bold) left-aligned at the top of the container.
-Avatar Display: The <AvatarPlayer /> component centered in the middle. It renders a high-fidelity video loop. When idle, it loops a "Breathing/Listening" video. When active, it plays the Gloss sequence.
+Avatar Display: The <AvatarPlayer /> component centered in the middle. It renders a flipbook animation using WebP frames at 24fps. When idle, it shows a "breathing" animation. When active, it plays the Gloss sequence frame-by-frame using requestAnimationFrame for smooth playback.
 Waveform: The <Waveform /> component positioned below the avatar. It animates CSS bars based on microphone input volume to provide visual feedback that the app is "hearing."
 Bottom Control Bar (Z-20):
 Identical positioning to View 1.
@@ -59,8 +60,8 @@ Instructions for the AI: Establish this structure immediately to ensure modulari
 │   │   ├── HandTracker.tsx    # MediaPipe Canvas overlay
 │   │   └── CameraFeed.tsx     # Raw video element
 │   ├── avatar/
-│   │   ├── AvatarPlayer.tsx   # Sequential Video Looper
-│   │   └── AvatarPreloader.ts # Caching logic
+│   │   ├── AvatarPlayer.tsx   # Main avatar wrapper (delegates to FlipbookPlayer)
+│   │   └── FlipbookPlayer.tsx # Canvas-based 24fps frame animation
 │   ├── ui/
 │   │   ├── ModeToggle.tsx     # The "Thumb Zone" button
 │   │   ├── Waveform.tsx       # CSS Animation for listening
@@ -69,18 +70,28 @@ Instructions for the AI: Establish this structure immediately to ensure modulari
 │       ├── SettingsModal.tsx
 │       └── HistoryModal.tsx
 ├── lib/
-│   ├── mock-data/       # [IMPORTANT] JSON mocks for Phases 1-4
-│   │   ├── avatars.json # Mock gloss-to-video mappings
+│   ├── mock-data/       # JSON mocks for development
+│   │   ├── avatars.json # Mock gloss mappings
 │   │   └── history.json # Mock conversation logs
-│   ├── supabase/        # Client instantiation (Phase 5)
+│   ├── supabase/        # Client instantiation
 │   ├── mediapipe/       # Worker setup for landmark detection
 │   ├── gemini/          # Prompt templates & API wrappers
 │   ├── elevenlabs/      # Audio conversion services
+│   ├── avatar/          # Flipbook avatar system
+│   │   ├── types.ts         # FlipbookEntry, FlipbookState types
+│   │   ├── flipbookService.ts # Frame loading, caching, Supabase Storage
+│   │   └── index.ts         # Barrel exports
 │   └── utils.ts         # Formatting helpers
 ├── hooks/
 │   ├── useCamera.ts     # Stream management
 │   ├── useAudio.ts      # Mic recording & permissions
+│   ├── useFlipbook.ts   # Flipbook playback timing (requestAnimationFrame)
 │   └── useTranslation.ts# Orchestrator for API calls
+├── scripts/             # Python data pipeline
+│   ├── extract_frames.py     # FFmpeg frame extraction from How2Sign
+│   ├── upload_to_supabase.py # Upload frames to Supabase Storage
+│   ├── generate_sample_frames.py # Generate placeholder frames
+│   └── requirements.txt      # Python dependencies
 ├── store/
 │   ├── useAppStore.ts   # Global state (CurrentMode, IsProcessing)
 │   └── useUserStore.ts  # Preferences (TextSize, AvatarMode)
@@ -92,11 +103,14 @@ Table: users
 id: UUID (PK) - references auth.users
 role: 'deaf' | 'hearing' | 'blind'
 preferences: JSONB { "visual_mode": "text_plus_avatar", "voice_id": "string", "high_contrast": boolean }
-Table: avatar_library
+Table: avatar_library (Flipbook System)
 gloss_label: String (PK/Unique Index) - e.g., "COFFEE"
-video_url: String (Public URL to Supabase Storage)
+frame_count: Integer - Number of WebP frames for this gloss
+fps: Integer (default 24) - Playback frame rate
+storage_path: String - Path in Supabase Storage (e.g., "avatars/COFFEE")
+video_url: String (legacy, nullable) - For backwards compatibility
 category: String
-metadata: JSONB (e.g., duration_ms, signer_id, dialect)
+metadata: JSONB (e.g., duration_ms, signer_id, dialect, source)
 Table: messages
 id: UUID (PK)
 session_id: UUID
@@ -124,15 +138,28 @@ Gemini Logic (Mock First):
 Phase 1-4: Return random mock response from lib/mock-data.
 Phase 5: Send prompt: "Analyze these temporal landmarks..."
 Test Requirement: Write a unit test that pushes mock landmark data and asserts the correct API payload is formed.
-Module C: Avatar Playback Engine (The Output Eye)
-Responsibility: Playing "Cinematic Avatars" gaplessly.
+Module C: Flipbook Avatar Engine (The Output Eye)
+Responsibility: Playing smooth 24fps flipbook animations from WebP frame sequences.
 Input: Receives an array of Gloss keys: ['WHERE', 'COFFEE'].
+Architecture:
+```
+How2Sign Videos → Python Extract (24fps) → WebP Frames → Supabase Storage
+                                                              ↓
+Frontend: FlipbookPlayer → Load frames → requestAnimationFrame → 41.67ms/frame
+```
 Logic:
-Pre-fetch video URLs for all keys from avatar_library.
-Queue System: Load Video 1 into Player A (Visible). Load Video 2 into Player B (Hidden).
-Transition: On Video 1 onEnded event, instantly hide Player A, show/play Player B.
-Fallback: If a Gloss key is missing in the DB, generate a text-overlay frame "WORD NOT FOUND".
-Test Requirement: Mock the video element and ensure the playlist index increments on ended event.
+1. Query avatar_library for frame_count, fps, storage_path.
+2. Generate frame URLs: `{storage_path}/0001.webp`, `{storage_path}/0002.webp`, etc.
+3. Preload all frames as HTMLImageElement objects into memory cache.
+4. Use requestAnimationFrame with timestamp delta for precise 24fps timing.
+5. Draw current frame to canvas element.
+6. On sequence complete, trigger onComplete callback and play next gloss in queue.
+Preloading Strategy:
+- Preload current gloss + next gloss in queue (lookahead).
+- Cache frames in memory Map for instant replay.
+- Limit concurrent loads to prevent bandwidth saturation.
+Fallback: If a Gloss key is missing in the DB, show error state with gloss label.
+Test Requirement: Mock Image loading and ensure frame index increments at correct timing.
 Module D: UI/UX & State (The Interaction)
 Responsibility: "Don't Make Me Think" implementation.
 Global Store (useAppStore):
@@ -160,13 +187,15 @@ Implement useCamera to get real video stream.
 Connect MediaPipe HandLandmarker.
 Draw red skeleton overlays on a canvas on top of the video.
 Verify: Moving hand in front of camera updates the red lines in real-time.
-Phase 3: The "Gloss-to-Video" Engine (Local Only)
-Goal: Perfect the video playback queue without a DB.
+Phase 3: The Flipbook Avatar Engine (Local + Supabase Storage) ✅ COMPLETE
+Goal: Implement 24fps flipbook animation system with frame sequences.
 Tasks:
-Create lib/mock-data/avatars.json with 3 local video paths (put 3 dummy .mp4s in /public).
-Build AvatarPlayer to read from this JSON.
-Implement the queue/sequencing logic.
-Verify: Calling playSequence(['HELLO', 'WORLD']) plays the two local videos back-to-back gaplessly.
+Set up Supabase Storage bucket "avatars" for WebP frames.
+Create Python scripts for frame extraction (extract_frames.py) and upload (upload_to_supabase.py).
+Build FlipbookPlayer component with canvas-based rendering.
+Implement flipbookService for frame URL generation and caching.
+Create useFlipbook hook with requestAnimationFrame timing.
+Verify: Calling playFlipbookSequence(['HELLO', 'COFFEE']) plays frames smoothly at 24fps.
 Phase 4: Mock Translation Loop
 Goal: Simulate the full app loop.
 Tasks:
@@ -183,11 +212,13 @@ Add .env.local variables.
 Verify: Real API calls are returning data.
 7. Variables & Configuration Constants
 config/constants.ts
-USE_MOCK_DATA: true (Set to false only in Phase 5)
-LANDMARK_Sampling_Rate: 100 (ms)
+USE_MOCK_DATA: false (Now using real Supabase data)
+LANDMARK_SAMPLING_RATE: 100 (ms)
 SILENCE_TRIGGER_THRESHOLD: 1500 (ms of no motion to trigger translation)
 MAX_BUFFER_SIZE: 50 (frames)
-AVATAR_FALLBACK_URL: "/assets/video/fallback.mp4"
+FRAME_DURATION_MS: 41.67 (1000ms / 24fps)
+DEFAULT_FPS: 24 (flipbook playback rate)
+SUPABASE_STORAGE_BUCKET: "avatars"
 8. Testing Strategy (Mandatory)
 Unit Tests (vitest):
 Test utils.ts formatters.
@@ -207,20 +238,32 @@ graph TD
         Mic[Microphone Input]
         MP[MediaPipe Hand + Face Mesh]
         AudioPlayer[Audio Player]
-        AvatarEngine[Avatar/Video Engine]
+        FlipbookEngine[Flipbook Avatar Engine]
+        FrameCache[Frame Memory Cache]
     end
 
     subgraph Backend_Services [Backend & API Layer]
         API[API Gateway / Edge Functions]
         Auth[Supabase Auth]
-        DB[(Supabase DB - User Data)]
-        AvatarLib[(Avatar Content Library)]
+        DB[(Supabase DB - avatar_library)]
+        Storage[(Supabase Storage - WebP Frames)]
     end
 
     subgraph AI_Services [External AI Cloud]
         Gemini[Google Gemini 3.0 API]
         Eleven[ElevenLabs API]
     end
+
+    subgraph Data_Pipeline [Offline Data Pipeline]
+        H2S[How2Sign Dataset]
+        FFmpeg[FFmpeg Extract 24fps]
+        Upload[Python Upload Script]
+    end
+
+    %% Data Pipeline Flow
+    H2S -->|Video Clips| FFmpeg
+    FFmpeg -->|WebP Frames| Upload
+    Upload -->|Store| Storage
 
     %% Sign to Speech Flow
     Cam -->|Video Stream| MP
@@ -233,17 +276,19 @@ graph TD
     API -->|Audio + Text| UI
     UI -->|Play| AudioPlayer
 
-    %% Speech to Sign/Text Flow
+    %% Speech to Sign/Text Flow (Flipbook)
     Mic -->|Audio Input| UI
     UI -->|POST: /translate-audio| API
     API -->|Audio Data| Eleven
     Eleven -->|STT Transcription| API
     API -->|Text| Gemini
-    Gemini -->|ASL Gloss (e.g., COFFEE WANT)| API
-    API -->|Gloss Keys| AvatarLib
-    AvatarLib -->|Avatar Video URLs| API
-    API -->|Text + Avatar Sequence| UI
-    UI -->|Play Avatar| AvatarEngine
+    Gemini -->|ASL Gloss Array| API
+    API -->|Query frame_count, storage_path| DB
+    DB -->|Flipbook Metadata| API
+    API -->|Gloss + Frame Info| UI
+    UI -->|Fetch Frames| Storage
+    Storage -->|WebP Images| FrameCache
+    FrameCache -->|24fps Playback| FlipbookEngine
 
     %% Data Persistence
     API -.->|Log History| DB

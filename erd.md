@@ -1,14 +1,15 @@
 Kine - Entity Relationship Diagram (ERD)
-Date: January 7, 2026
+Date: January 14, 2026
 Database System: PostgreSQL (Supabase)
+Last Updated: January 14, 2026 (Flipbook Avatar System)
 1. Data Model Overview
 The database is designed to support high-performance read/writes for real-time translation logs while maintaining user preferences for accessibility.
-New Addition: The AVATAR_LIBRARY table acts as the content management system (CMS) for the "Gloss-to-Video" Cinematic Avatar feature.
+Key Feature: The AVATAR_LIBRARY table powers the Flipbook Avatar System - storing metadata for WebP frame sequences stored in Supabase Storage.
 Core Entities:
 Users: Stores authentication profiles and accessibility settings.
 Sessions: Groups translation interactions into conversations.
 Messages: Individual turns of translation.
-Avatar_Library: [NEW] Maps text/gloss to high-fidelity video URLs for the digital human output.
+Avatar_Library: Maps gloss labels to flipbook frame sequences (WebP images at 24fps) stored in Supabase Storage.
 Saved_Phrases: Quick-access text-to-speech cards.
 Feedback: User ratings on translation accuracy.
 2. Mermaid ERD Visualization
@@ -51,11 +52,14 @@ erDiagram
 
     AVATAR_LIBRARY {
         uuid id PK
-        string gloss_label "Unique key (e.g., 'COFFEE')"
-        string video_url "Path to .mp4 loop in Storage"
+        string gloss_label UK "Unique key (e.g., 'COFFEE')"
+        int frame_count "Number of WebP frames"
+        int fps "Playback rate (default 24)"
+        string storage_path "Supabase Storage path (e.g., 'avatars/COFFEE')"
+        string video_url "Legacy field (nullable)"
         string category "e.g., 'Food', 'Directions'"
         int difficulty_level
-        jsonb metadata "Signer info, regional dialect tags"
+        jsonb metadata "duration_ms, signer_id, dialect, source"
     }
 
     SAVED_PHRASES {
@@ -81,11 +85,27 @@ erDiagram
 Table: public.users
 preferences (JSONB):
 visual_mode: 'text_only' or 'text_plus_avatar'. Allows users to save bandwidth or battery if they don't need the cinematic visuals.
-Table: public.avatar_library (New)
-This table powers the "Cinematic Avatar" engine.
+Table: public.avatar_library (Flipbook System)
+This table powers the Flipbook Avatar Engine - a 24fps frame-based animation system.
 gloss_label (String, Unique Index): The critical lookup key. When Gemini outputs "COFFEE", the app queries this column.
-video_url (String): Points to the high-fidelity video loop in Supabase Storage (optimized for seamless playback).
-metadata (JSONB): Future-proofing. Can store tags like {"dialect": "NYC", "hand": "right", "signer_model": "human_v1"}.
+frame_count (Integer): Number of WebP frames for this gloss. Example: 36 frames = 1.5 seconds at 24fps.
+fps (Integer, Default 24): Playback frame rate. Used to calculate timing: frame_duration = 1000ms / fps.
+storage_path (String): Path in Supabase Storage bucket "avatars". Example: "avatars/COFFEE" → frames at "avatars/COFFEE/0001.webp", "avatars/COFFEE/0002.webp", etc.
+video_url (String, Nullable): Legacy field for backwards compatibility with video-based playback.
+metadata (JSONB): Stores additional info like {"duration_ms": 1500, "signer_id": "how2sign", "dialect": "ASL", "source": "How2Sign Dataset"}.
+
+Flipbook Storage Structure (Supabase Storage):
+```
+avatars/                    # Storage bucket
+├── HELLO/
+│   ├── 0001.webp          # Frame 1
+│   ├── 0002.webp          # Frame 2
+│   └── ... (24 frames = 1 second)
+├── COFFEE/
+│   ├── 0001.webp
+│   └── ... (30 frames)
+└── manifest.json          # Optional frame counts
+```
 Table: public.messages
 gloss_sequence (Text Array): Crucial for debugging.
 Scenario: User complains the avatar signed "TEA" instead of "COFFEE".
