@@ -2,7 +2,7 @@
 // Phase 1-4: USE_MOCK_DATA = true
 // Phase 5: Set to false for real backend
 
-export const USE_MOCK_DATA = true;
+export const USE_MOCK_DATA = false;
 
 // MediaPipe configuration
 export const LANDMARK_SAMPLING_RATE = 100; // ms between inference runs

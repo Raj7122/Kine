@@ -34,7 +34,7 @@ export async function initializeHandTracker(): Promise<HandLandmarker> {
       baseOptions: {
         modelAssetPath:
           'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-        delegate: 'GPU',
+        delegate: 'CPU',
       },
       runningMode: 'VIDEO',
       numHands: 2,

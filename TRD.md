@@ -198,3 +198,53 @@ ModeToggle: Ensure click fires the state change function.
 Integration Tests:
 Phases 1-4: Verify mock data flows correctly.
 Phase 5: Verify that fetchTranslation calls the correct Edge Function URL.
+
+Mermaid Chart
+graph TD
+    subgraph Client_Device [User's Mobile Device]
+        UI[User Interface]
+        Cam[Camera Input]
+        Mic[Microphone Input]
+        MP[MediaPipe Hand + Face Mesh]
+        AudioPlayer[Audio Player]
+        AvatarEngine[Avatar/Video Engine]
+    end
+
+    subgraph Backend_Services [Backend & API Layer]
+        API[API Gateway / Edge Functions]
+        Auth[Supabase Auth]
+        DB[(Supabase DB - User Data)]
+        AvatarLib[(Avatar Content Library)]
+    end
+
+    subgraph AI_Services [External AI Cloud]
+        Gemini[Google Gemini 3.0 API]
+        Eleven[ElevenLabs API]
+    end
+
+    %% Sign to Speech Flow
+    Cam -->|Video Stream| MP
+    MP -->|Hand + Face Landmarks| UI
+    UI -->|POST: /translate-sign| API
+    API -->|Prompt w/ Facial Context| Gemini
+    Gemini -->|Translated Text + Emotion Tag| API
+    API -->|Text + Emotion| Eleven
+    Eleven -->|Audio Stream| API
+    API -->|Audio + Text| UI
+    UI -->|Play| AudioPlayer
+
+    %% Speech to Sign/Text Flow
+    Mic -->|Audio Input| UI
+    UI -->|POST: /translate-audio| API
+    API -->|Audio Data| Eleven
+    Eleven -->|STT Transcription| API
+    API -->|Text| Gemini
+    Gemini -->|ASL Gloss (e.g., COFFEE WANT)| API
+    API -->|Gloss Keys| AvatarLib
+    AvatarLib -->|Avatar Video URLs| API
+    API -->|Text + Avatar Sequence| UI
+    UI -->|Play Avatar| AvatarEngine
+
+    %% Data Persistence
+    API -.->|Log History| DB
+    UI -.->|Authenticate| Auth

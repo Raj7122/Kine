@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python
+scripts/venv/
+scripts/frames/
+scripts/how2sign/
+__pycache__/
+*.pyc
+
+# Supabase
+supabase/.temp/

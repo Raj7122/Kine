@@ -8,7 +8,7 @@ export const isGeminiConfigured = !!(
 );
 
 // Gemini API endpoint
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent';
 
 export interface TranslationResult {
   input: string;

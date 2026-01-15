@@ -10,6 +10,7 @@ import { Waveform } from '@/components/ui/Waveform';
 import { CameraFeed } from '@/components/camera/CameraFeed';
 import { HandTracker } from '@/components/camera/HandTracker';
 import { AvatarPlayer } from '@/components/avatar/AvatarPlayer';
+import { SettingsModal, HistoryModal } from '@/components/modals';
 import { TRANSITION_DURATION } from '@/config/constants';
 import type { LandmarkResult } from '@/lib/mediapipe';
 import { useTranslation, type TranslationState } from '@/hooks/useTranslation';
@@ -17,14 +18,24 @@ import { Play, Square } from 'lucide-react';
 
 export default function Home() {
   const { mode } = useAppStore();
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
       <AnimatePresence mode="wait">
         {mode === 'SIGNING' ? (
-          <SigningView key="signing" />
+          <SigningView
+            key="signing"
+            onSettingsClick={() => setIsSettingsOpen(true)}
+            onHistoryClick={() => setIsHistoryOpen(true)}
+          />
         ) : (
-          <ListeningView key="listening" />
+          <ListeningView
+            key="listening"
+            onSettingsClick={() => setIsSettingsOpen(true)}
+            onHistoryClick={() => setIsHistoryOpen(true)}
+          />
         )}
       </AnimatePresence>
 
@@ -32,11 +43,26 @@ export default function Home() {
       <div className="fixed bottom-0 left-0 right-0 z-30 flex h-[20vh] items-center justify-center bg-gradient-to-t from-black via-black/90 to-transparent">
         <ModeToggle />
       </div>
+
+      {/* Modals */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
+      <HistoryModal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+      />
     </div>
   );
 }
 
-function SigningView() {
+interface ViewProps {
+  onSettingsClick: () => void;
+  onHistoryClick: () => void;
+}
+
+function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const {
     setMode,
@@ -119,8 +145,8 @@ function SigningView() {
       <div className="absolute inset-0 z-20 flex flex-col">
         {/* Top Bar */}
         <TopBar
-          onHistoryClick={() => console.log('History clicked')}
-          onSettingsClick={() => console.log('Settings clicked')}
+          onHistoryClick={onHistoryClick}
+          onSettingsClick={onSettingsClick}
         />
 
         {/* Spacer */}
@@ -149,7 +175,7 @@ function SigningView() {
   );
 }
 
-function ListeningView() {
+function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   const [isTestMode, setIsTestMode] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const hasAutoPlayedRef = useRef(false);
@@ -307,8 +333,8 @@ function ListeningView() {
 
       {/* Z-20: Top Bar */}
       <TopBar
-        onHistoryClick={() => console.log('History clicked')}
-        onSettingsClick={() => console.log('Settings clicked')}
+        onHistoryClick={onHistoryClick}
+        onSettingsClick={onSettingsClick}
       />
     </motion.div>
   );

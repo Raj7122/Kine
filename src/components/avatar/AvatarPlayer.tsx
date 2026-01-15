@@ -1,16 +1,23 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
+import { FlipbookPlayer } from './FlipbookPlayer';
 import { AlertTriangle } from 'lucide-react';
 
 interface AvatarPlayerProps {
   className?: string;
   onSequenceComplete?: () => void;
+  // Set to true to force flipbook mode (for testing)
+  useFlipbook?: boolean;
 }
 
-export function AvatarPlayer({ className = '', onSequenceComplete }: AvatarPlayerProps) {
+export function AvatarPlayer({
+  className = '',
+  onSequenceComplete,
+  useFlipbook = true, // Default to flipbook mode
+}: AvatarPlayerProps) {
   const {
     isPlaying,
     currentGloss,
@@ -24,20 +31,19 @@ export function AvatarPlayer({ className = '', onSequenceComplete }: AvatarPlaye
   } = useAvatarPlayer();
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [flipbookMode, setFlipbookMode] = useState(useFlipbook);
 
-  // Handle mock playback timing
+  // Handle legacy mock playback timing (when not using flipbook)
   useEffect(() => {
-    if (!isPlaying || !currentGloss) return;
+    if (flipbookMode || !isPlaying || !currentGloss) return;
 
     const duration = getCurrentDuration();
     console.log(`[AvatarPlayer] Playing "${currentGloss}" for ${duration}ms`);
 
-    // Clear any existing timer
     if (timerRef.current) {
       clearTimeout(timerRef.current);
     }
 
-    // Set timer for mock playback duration
     timerRef.current = setTimeout(() => {
       onItemComplete();
     }, duration);
@@ -47,31 +53,65 @@ export function AvatarPlayer({ className = '', onSequenceComplete }: AvatarPlaye
         clearTimeout(timerRef.current);
       }
     };
-  }, [isPlaying, currentGloss, currentIndex, getCurrentDuration, onItemComplete]);
+  }, [flipbookMode, isPlaying, currentGloss, currentIndex, getCurrentDuration, onItemComplete]);
 
-  // Notify parent when sequence completes
-  useEffect(() => {
-    if (!isPlaying && totalItems > 0 && currentIndex === 0 && onSequenceComplete) {
-      // Sequence just finished (isPlaying went false, queue was reset)
-    }
-  }, [isPlaying, totalItems, currentIndex, onSequenceComplete]);
-
-  // Expose playSequence to parent via ref or direct call
-  // For now, we'll use a global function for testing
+  // Expose playSequence to parent via global function for testing
   useEffect(() => {
     // @ts-expect-error - Expose for testing in browser console
-    window.playAvatarSequence = playSequence;
+    window.playAvatarSequence = (glosses: string[]) => {
+      if (flipbookMode) {
+        // Let FlipbookPlayer handle it via its own global function
+        // @ts-expect-error - Call flipbook's global function
+        if (window.playFlipbookSequence) {
+          // @ts-expect-error
+          window.playFlipbookSequence(glosses);
+        }
+      } else {
+        playSequence(glosses);
+      }
+    };
+
     // @ts-expect-error - Expose for testing
-    window.stopAvatar = stop;
+    window.stopAvatar = () => {
+      if (flipbookMode) {
+        // @ts-expect-error
+        if (window.stopFlipbook) {
+          // @ts-expect-error
+          window.stopFlipbook();
+        }
+      } else {
+        stop();
+      }
+    };
+
+    // Toggle between modes
+    // @ts-expect-error - Expose for testing
+    window.toggleAvatarMode = () => {
+      setFlipbookMode(prev => !prev);
+      console.log(`[AvatarPlayer] Mode: ${!flipbookMode ? 'flipbook' : 'legacy'}`);
+    };
 
     return () => {
       // @ts-expect-error - Cleanup
       delete window.playAvatarSequence;
       // @ts-expect-error - Cleanup
       delete window.stopAvatar;
+      // @ts-expect-error - Cleanup
+      delete window.toggleAvatarMode;
     };
-  }, [playSequence, stop]);
+  }, [flipbookMode, playSequence, stop]);
 
+  // If using flipbook mode, render FlipbookPlayer
+  if (flipbookMode) {
+    return (
+      <FlipbookPlayer
+        className={className}
+        onSequenceComplete={onSequenceComplete}
+      />
+    );
+  }
+
+  // Legacy emoji-based avatar display
   return (
     <div className={`relative flex items-center justify-center rounded-2xl bg-gray-900/50 overflow-hidden ${className}`}>
       {/* Idle State - Breathing Animation */}
