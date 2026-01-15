@@ -206,20 +206,20 @@ ELEVENLABS_API_KEY=your-elevenlabs-key
 - Draw red skeleton overlays on canvas
 - Run inference every 100ms (battery optimization)
 
-### Phase 3: Avatar Engine ✅ FLIPBOOK COMPLETE / 🔄 GENASL IN PROGRESS
-- ✅ Set up Supabase Storage bucket "avatars" for WebP frames (fallback)
+### Phase 3: Avatar Engine ✅ COMPLETE (Option B: Flipbook)
+- ✅ Set up Supabase Storage bucket "avatars" for WebP frames
 - ✅ Create Python scripts for frame extraction and upload
 - ✅ Build FlipbookPlayer component with canvas-based rendering
-- 🔄 Integrate AWS GenASL for primary video-based avatar
-- 🔄 Build GenASLPlayer component for video playback
-- Verify: `playGenASL('Hello world')` plays GenASL video
+- ✅ Flipbook as primary avatar output (GenASL available as future upgrade)
+- Verify: `playFlipbookSequence(['HELLO', 'WORLD'])` plays 24fps animation
 
-### Phase 4: The Gemini Sandwich Integration 🔄 IN PROGRESS
-- Implement Gemini 3.0 Multimodal for SIGNING_MODE (landmarks → English)
-- Implement Gemini 3.0 translation for LISTENING_MODE (English → ASL gloss)
-- Connect GenASL to receive gloss from Gemini output
-- Full loop: Sign → Gemini Eyes → English → ElevenLabs → Audio
-- Full loop: Speak → Gemini Linguist → Gloss → GenASL → Avatar Video
+### Phase 4: The Gemini Sandwich Integration ✅ COMPLETE
+- ✅ signRecognitionService.ts: Gemini Multimodal for SIGNING_MODE (landmarks → English)
+- ✅ translationService.ts: Gemini for LISTENING_MODE (English → ASL gloss)
+- ✅ useSpeechRecognition.ts: Web Speech API integration for speech input
+- ✅ Connect Flipbook player to receive gloss from Gemini output
+- Full loop: Sign → Gemini Eyes → English → Display
+- Full loop: Speak → Gemini Linguist → Gloss → Flipbook Avatar
 
 ### Phase 5: Backend & API Integration ✅ PARTIAL
 - Supabase Client configured with real credentials

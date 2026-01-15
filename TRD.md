@@ -3,7 +3,7 @@ Target Builder: Claude Code (Cursor) / AI Agent
 Project Type: Real-Time Accessibility PWA / Mobile Web App (Android/iOS Compatible)
 Tech Stack: Next.js 14+ (App Router), TypeScript, Tailwind CSS, Supabase, Google MediaPipe (Web), Google Gemini 3.0 API (Multimodal), AWS GenASL, ElevenLabs API.
 Date: January 14, 2026
-Last Updated: January 15, 2026 (Gemini Sandwich Architecture + AWS GenASL)
+Last Updated: January 15, 2026 (Gemini Sandwich Architecture - Option B: Flipbook)
 1. System Architecture Overview
 Core Philosophy
 The application acts as a bi-directional bridge. It is "State-Driven" rather than "Page-Driven," relying on two primary modes (SIGNING_MODE vs. LISTENING_MODE) within a single dynamic view to reduce latency.
