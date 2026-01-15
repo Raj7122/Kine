@@ -4,20 +4,36 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
 import { FlipbookPlayer } from './FlipbookPlayer';
+import { GenASLPlayer } from './GenASLPlayer';
 import { AlertTriangle } from 'lucide-react';
+import { isGenASLConfigured } from '@/lib/aws/config';
+
+// Avatar rendering modes
+export type AvatarMode = 'flipbook' | 'genasl' | 'legacy';
 
 interface AvatarPlayerProps {
   className?: string;
   onSequenceComplete?: () => void;
-  // Set to true to force flipbook mode (for testing)
+  // Avatar rendering mode
+  mode?: AvatarMode;
+  // Legacy prop for backwards compatibility
   useFlipbook?: boolean;
+}
+
+// Determine default mode based on configuration
+function getDefaultMode(): AvatarMode {
+  if (isGenASLConfigured) return 'genasl';
+  return 'flipbook';
 }
 
 export function AvatarPlayer({
   className = '',
   onSequenceComplete,
-  useFlipbook = true, // Default to flipbook mode
+  mode,
+  useFlipbook, // Deprecated, use mode instead
 }: AvatarPlayerProps) {
+  // Handle legacy useFlipbook prop
+  const initialMode = mode || (useFlipbook === false ? 'legacy' : getDefaultMode());
   const {
     isPlaying,
     currentGloss,
@@ -31,11 +47,11 @@ export function AvatarPlayer({
   } = useAvatarPlayer();
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const [flipbookMode, setFlipbookMode] = useState(useFlipbook);
+  const [avatarMode, setAvatarMode] = useState<AvatarMode>(initialMode);
 
-  // Handle legacy mock playback timing (when not using flipbook)
+  // Handle legacy mock playback timing (when using legacy mode)
   useEffect(() => {
-    if (flipbookMode || !isPlaying || !currentGloss) return;
+    if (avatarMode !== 'legacy' || !isPlaying || !currentGloss) return;
 
     const duration = getCurrentDuration();
     console.log(`[AvatarPlayer] Playing "${currentGloss}" for ${duration}ms`);
@@ -53,18 +69,24 @@ export function AvatarPlayer({
         clearTimeout(timerRef.current);
       }
     };
-  }, [flipbookMode, isPlaying, currentGloss, currentIndex, getCurrentDuration, onItemComplete]);
+  }, [avatarMode, isPlaying, currentGloss, currentIndex, getCurrentDuration, onItemComplete]);
 
   // Expose playSequence to parent via global function for testing
   useEffect(() => {
     // @ts-expect-error - Expose for testing in browser console
     window.playAvatarSequence = (glosses: string[]) => {
-      if (flipbookMode) {
-        // Let FlipbookPlayer handle it via its own global function
+      if (avatarMode === 'flipbook') {
         // @ts-expect-error - Call flipbook's global function
         if (window.playFlipbookSequence) {
           // @ts-expect-error
           window.playFlipbookSequence(glosses);
+        }
+      } else if (avatarMode === 'genasl') {
+        // GenASL takes full text, not glosses - join them
+        // @ts-expect-error - Call GenASL's global function
+        if (window.playGenASL) {
+          // @ts-expect-error
+          window.playGenASL(glosses.join(' '));
         }
       } else {
         playSequence(glosses);
@@ -73,23 +95,35 @@ export function AvatarPlayer({
 
     // @ts-expect-error - Expose for testing
     window.stopAvatar = () => {
-      if (flipbookMode) {
+      if (avatarMode === 'flipbook') {
         // @ts-expect-error
-        if (window.stopFlipbook) {
-          // @ts-expect-error
-          window.stopFlipbook();
-        }
+        if (window.stopFlipbook) window.stopFlipbook();
+      } else if (avatarMode === 'genasl') {
+        // @ts-expect-error
+        if (window.stopGenASL) window.stopGenASL();
       } else {
         stop();
       }
     };
 
-    // Toggle between modes
+    // Cycle through avatar modes
     // @ts-expect-error - Expose for testing
-    window.toggleAvatarMode = () => {
-      setFlipbookMode(prev => !prev);
-      console.log(`[AvatarPlayer] Mode: ${!flipbookMode ? 'flipbook' : 'legacy'}`);
+    window.setAvatarMode = (newMode: AvatarMode) => {
+      setAvatarMode(newMode);
+      console.log(`[AvatarPlayer] Mode set to: ${newMode}`);
     };
+
+    // @ts-expect-error - Expose for testing
+    window.cycleAvatarMode = () => {
+      const modes: AvatarMode[] = ['flipbook', 'genasl', 'legacy'];
+      const currentIdx = modes.indexOf(avatarMode);
+      const nextMode = modes[(currentIdx + 1) % modes.length];
+      setAvatarMode(nextMode);
+      console.log(`[AvatarPlayer] Mode: ${nextMode}`);
+    };
+
+    // @ts-expect-error - Expose for testing
+    window.getAvatarMode = () => avatarMode;
 
     return () => {
       // @ts-expect-error - Cleanup
@@ -97,16 +131,30 @@ export function AvatarPlayer({
       // @ts-expect-error - Cleanup
       delete window.stopAvatar;
       // @ts-expect-error - Cleanup
-      delete window.toggleAvatarMode;
+      delete window.setAvatarMode;
+      // @ts-expect-error - Cleanup
+      delete window.cycleAvatarMode;
+      // @ts-expect-error - Cleanup
+      delete window.getAvatarMode;
     };
-  }, [flipbookMode, playSequence, stop]);
+  }, [avatarMode, playSequence, stop]);
 
-  // If using flipbook mode, render FlipbookPlayer
-  if (flipbookMode) {
+  // Render based on avatar mode
+  if (avatarMode === 'flipbook') {
     return (
       <FlipbookPlayer
         className={className}
         onSequenceComplete={onSequenceComplete}
+      />
+    );
+  }
+
+  if (avatarMode === 'genasl') {
+    return (
+      <GenASLPlayer
+        className={className}
+        onTranslationComplete={() => onSequenceComplete?.()}
+        onError={(error) => console.error('[AvatarPlayer] GenASL error:', error)}
       />
     );
   }
@@ -223,5 +271,6 @@ export function AvatarPlayer({
   );
 }
 
-// Export hook for external control
+// Export hook and types for external control
 export { useAvatarPlayer };
+export type { AvatarMode };
