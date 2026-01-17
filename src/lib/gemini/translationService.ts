@@ -1,14 +1,14 @@
 import { ASL_GLOSS_SYSTEM_PROMPT, generateTranslationPrompt, parseGlossResponse } from './prompts';
 
-// Check if Gemini is configured
-const geminiApiKey = process.env.GEMINI_API_KEY;
+// Check if Gemini is configured (support both server and client-side)
+const geminiApiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 export const isGeminiConfigured = !!(
   geminiApiKey &&
   geminiApiKey !== 'your-gemini-api-key-here'
 );
 
 // Gemini API endpoint
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
 
 export interface TranslationResult {
   input: string;

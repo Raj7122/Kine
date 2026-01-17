@@ -1,0 +1,19 @@
+{
+  "name": "Kine - ASL Translation",
+  "short_name": "Kine",
+  "description": "Real-time bi-directional sign language translation PWA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#facc15",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["accessibility", "communication", "utilities"]
+}

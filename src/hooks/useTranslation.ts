@@ -2,17 +2,19 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { MotionDetector, type LandmarkResult } from '@/lib/mediapipe';
-import { getMockTranslation, type MockTranslation } from '@/lib/translation';
+import { getMockTranslation } from '@/lib/translation';
 import {
   translateToGloss,
   isGeminiConfigured,
   recognizeSign,
   createLandmarkBuffer,
   isGeminiMultimodalConfigured,
+  captureVideoFrame,
   type SignLandmarkData,
+  type VideoFrame,
 } from '@/lib/gemini';
 import { saveMessage, generateSessionId } from '@/lib/supabase';
-import { SILENCE_TRIGGER_THRESHOLD, USE_MOCK_DATA } from '@/config/constants';
+import { SILENCE_TRIGGER_THRESHOLD, USE_MOCK_DATA, MAX_BUFFER_SIZE } from '@/config/constants';
 
 export type TranslationState =
   | 'idle'
@@ -26,7 +28,7 @@ export interface TranslationResult {
   input: string;
   gloss: string[];
   category: string;
-  source: 'gemini' | 'mock';
+  source: 'gemini' | 'gemini-vision' | 'mock';
 }
 
 export interface UseTranslationReturn {
@@ -34,11 +36,15 @@ export interface UseTranslationReturn {
   translation: TranslationResult | null;
   silenceProgress: number; // 0 to 1, how close to triggering
   processLandmarks: (result: LandmarkResult) => void;
+  setVideoElement: (video: HTMLVideoElement | null) => void;
   reset: () => void;
 }
 
 // Session ID for message tracking
 let sessionId: string | null = null;
+
+// Video frame capture interval (capture every N landmark frames)
+const VIDEO_CAPTURE_INTERVAL = 4; // Capture every 4th frame (~5 FPS at 20 FPS landmark rate)
 
 export function useTranslation(
   onTranslationComplete?: (translation: TranslationResult) => void
@@ -54,11 +60,26 @@ export function useTranslation(
   // Buffer to collect landmark frames for Gemini sign recognition
   const landmarkBufferRef = useRef<SignLandmarkData[]>([]);
 
+  // Buffer to collect video frames for true multimodal input
+  const videoFrameBufferRef = useRef<VideoFrame[]>([]);
+
+  // Reference to video element for frame capture
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
+
+  // Frame counter for video capture interval
+  const frameCounterRef = useRef(0);
+
   // Initialize session ID
   if (!sessionId) {
     sessionId = generateSessionId();
     console.log('[Translation] Session ID:', sessionId);
   }
+
+  // Set video element for frame capture
+  const setVideoElement = useCallback((video: HTMLVideoElement | null) => {
+    videoElementRef.current = video;
+    console.log('[Translation] Video element set:', !!video);
+  }, []);
 
   // Process incoming landmark data
   const processLandmarks = useCallback((result: LandmarkResult) => {
@@ -72,14 +93,16 @@ export function useTranslation(
       setState('idle');
       silenceStartRef.current = null;
       setSilenceProgress(0);
-      // Clear buffer when no hands
+      // Clear buffers when no hands
       if (landmarkBufferRef.current.length > 0) {
         landmarkBufferRef.current = [];
+        videoFrameBufferRef.current = [];
+        frameCounterRef.current = 0;
       }
       return;
     }
 
-    // Add current frame to buffer (for Gemini sign recognition)
+    // Add current frame to landmark buffer
     const frameData: SignLandmarkData = {
       hands: result.hands,
       face: result.face || null,
@@ -87,9 +110,22 @@ export function useTranslation(
     };
     landmarkBufferRef.current.push(frameData);
 
-    // Keep buffer at reasonable size (last 60 frames ~6 seconds at 10fps)
-    if (landmarkBufferRef.current.length > 60) {
-      landmarkBufferRef.current = landmarkBufferRef.current.slice(-60);
+    // Capture video frame at intervals for multimodal input
+    frameCounterRef.current++;
+    if (frameCounterRef.current % VIDEO_CAPTURE_INTERVAL === 0 && videoElementRef.current) {
+      const videoFrame = captureVideoFrame(videoElementRef.current);
+      if (videoFrame) {
+        videoFrameBufferRef.current.push(videoFrame);
+        // Keep video buffer manageable (max 20 frames)
+        if (videoFrameBufferRef.current.length > 20) {
+          videoFrameBufferRef.current = videoFrameBufferRef.current.slice(-20);
+        }
+      }
+    }
+
+    // Keep landmark buffer at reasonable size
+    if (landmarkBufferRef.current.length > MAX_BUFFER_SIZE) {
+      landmarkBufferRef.current = landmarkBufferRef.current.slice(-MAX_BUFFER_SIZE);
     }
 
     // Check if still (low motion)
@@ -99,6 +135,7 @@ export function useTranslation(
         silenceStartRef.current = Date.now();
         setState('pause_detected');
         console.log('[Translation] Pause detected, starting silence timer');
+        console.log('[Translation] Buffers - Landmarks:', landmarkBufferRef.current.length, 'Video frames:', videoFrameBufferRef.current.length);
       }
 
       const silenceDuration = Date.now() - silenceStartRef.current;
@@ -108,7 +145,7 @@ export function useTranslation(
       // Check if silence threshold reached
       if (silenceDuration >= SILENCE_TRIGGER_THRESHOLD) {
         console.log('[Translation] Silence threshold reached, triggering translation');
-        console.log('[Translation] Landmark buffer size:', landmarkBufferRef.current.length);
+        console.log('[Translation] Final buffers - Landmarks:', landmarkBufferRef.current.length, 'Video frames:', videoFrameBufferRef.current.length);
         triggerTranslation();
       }
     } else {
@@ -134,28 +171,42 @@ export function useTranslation(
     try {
       let result: TranslationResult;
       let recognizedText: string;
+      let recognitionSource: 'gemini' | 'gemini-vision' | 'mock' = 'mock';
 
       // Step 1: Sign Recognition - Gemini as "The Eyes"
-      // Convert landmarks to English text
+      // Convert landmarks + video frames to English text
       if (!USE_MOCK_DATA && isGeminiMultimodalConfigured && landmarkBufferRef.current.length > 5) {
-        console.log('[Translation] Step 1: Gemini Sign Recognition (The Eyes)');
-        const buffer = createLandmarkBuffer(landmarkBufferRef.current, 30);
+        console.log('[Translation] Step 1: Gemini Sign Recognition (The Eyes) with video frames');
+
+        // Create buffer with both landmarks and video frames
+        const buffer = createLandmarkBuffer(
+          landmarkBufferRef.current,
+          videoFrameBufferRef.current,
+          40 // Use more landmark frames for better accuracy
+        );
+
         const recognition = await recognizeSign(buffer);
         recognizedText = recognition.text;
-        console.log('[Translation] Recognized:', recognizedText, '(source:', recognition.source, ')');
+        recognitionSource = recognition.source;
+
+        console.log('[Translation] Recognized:', recognizedText, '(source:', recognition.source, ', confidence:', recognition.confidence, ')');
       } else if (!USE_MOCK_DATA && isGeminiConfigured) {
         // Fallback: Use a context-aware placeholder if sign recognition not available
         console.log('[Translation] Sign recognition not available, using contextual placeholder');
         recognizedText = 'Hello, how are you?';
+        recognitionSource = 'mock';
       } else {
         // Mock mode
         const mockPhrases = ['Hello', 'Thank you', 'How are you?', 'Nice to meet you'];
         recognizedText = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
         console.log('[Translation] Mock recognition:', recognizedText);
+        recognitionSource = 'mock';
       }
 
-      // Clear the landmark buffer after processing
+      // Clear the buffers after processing
       landmarkBufferRef.current = [];
+      videoFrameBufferRef.current = [];
+      frameCounterRef.current = 0;
 
       // Step 2: Translation - Gemini as "The Linguist"
       // Convert English text to ASL Gloss
@@ -168,7 +219,7 @@ export function useTranslation(
           input: recognizedText,
           gloss: geminiResult.gloss,
           category: 'translation',
-          source: geminiResult.source,
+          source: recognitionSource,
         };
         console.log('[Translation] Gloss sequence:', result.gloss);
       } else {
@@ -217,7 +268,9 @@ export function useTranslation(
     silenceStartRef.current = null;
     isProcessingRef.current = false;
     motionDetectorRef.current.reset();
-    landmarkBufferRef.current = []; // Clear landmark buffer
+    landmarkBufferRef.current = [];
+    videoFrameBufferRef.current = [];
+    frameCounterRef.current = 0;
     console.log('[Translation] State reset');
   }, []);
 
@@ -226,6 +279,7 @@ export function useTranslation(
     translation,
     silenceProgress,
     processLandmarks,
+    setVideoElement,
     reset,
   };
 }

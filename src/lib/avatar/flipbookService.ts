@@ -66,9 +66,14 @@ export async function getFlipbookEntry(gloss: string): Promise<FlipbookEntry | n
       .from('avatar_library')
       .select('gloss_label, frame_count, fps, storage_path, metadata')
       .eq('gloss_label', normalizedGloss)
-      .single();
+      .maybeSingle(); // Use maybeSingle to avoid 406 error when no row found
 
-    if (error || !data || !data.frame_count) {
+    if (error) {
+      console.log(`[Flipbook] Error fetching ${normalizedGloss}:`, error.message);
+      return null;
+    }
+
+    if (!data || !data.frame_count) {
       console.log(`[Flipbook] No flipbook data for ${normalizedGloss}`);
       return null;
     }

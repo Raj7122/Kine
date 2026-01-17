@@ -138,7 +138,7 @@ export function FlipbookPlayer({
               </span>
             </motion.div>
           ) : state.error ? (
-            // Error state
+            // Error state - show gloss as text fallback
             <motion.div
               key="error"
               initial={{ opacity: 0, scale: 0.8 }}
@@ -146,8 +146,10 @@ export function FlipbookPlayer({
               exit={{ opacity: 0 }}
               className="flex flex-col items-center gap-2 px-4 text-center"
             >
-              <span className="text-3xl">⚠️</span>
-              <span className="text-xs text-red-400">{state.error}</span>
+              <span className="text-4xl font-bold text-yellow-400">
+                {currentGloss || '?'}
+              </span>
+              <span className="text-xs text-yellow-400/50">(no animation)</span>
             </motion.div>
           ) : isIdle ? (
             // Idle state - breathing animation

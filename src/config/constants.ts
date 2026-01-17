@@ -5,11 +5,15 @@
 export const USE_MOCK_DATA = false;
 
 // MediaPipe configuration
-export const LANDMARK_SAMPLING_RATE = 100; // ms between inference runs
+export const LANDMARK_SAMPLING_RATE = 50; // ms between inference runs (20 FPS for better motion capture)
 
 // Translation trigger settings
-export const SILENCE_TRIGGER_THRESHOLD = 1500; // ms of no motion to trigger translation
-export const MAX_BUFFER_SIZE = 50; // max frames to buffer
+export const SILENCE_TRIGGER_THRESHOLD = 1200; // ms of no motion to trigger translation (faster response)
+export const MAX_BUFFER_SIZE = 80; // max frames to buffer (4 sec at 20 FPS)
+
+// Sign recognition settings
+export const SIGN_RECOGNITION_FRAME_COUNT = 5; // number of video frames to send to Gemini
+export const SIGN_RECOGNITION_MAX_LANDMARKS = 40; // max landmark frames to send
 
 // Avatar fallback
 export const AVATAR_FALLBACK_URL = "/assets/video/fallback.mp4";

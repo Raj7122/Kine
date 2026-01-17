@@ -9,7 +9,7 @@ import { TopBar } from '@/components/ui/TopBar';
 import { Waveform } from '@/components/ui/Waveform';
 import { CameraFeed } from '@/components/camera/CameraFeed';
 import { HandTracker } from '@/components/camera/HandTracker';
-import { AvatarPlayer } from '@/components/avatar/AvatarPlayer';
+import { AvatarPlayer, isQuickMode, setQuickMode } from '@/components/avatar/AvatarPlayer';
 import { SettingsModal, HistoryModal } from '@/components/modals';
 import { TRANSITION_DURATION } from '@/config/constants';
 import type { LandmarkResult } from '@/lib/mediapipe';
@@ -78,6 +78,7 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
     state: translationState,
     silenceProgress,
     processLandmarks,
+    setVideoElement: setTranslationVideoElement,
     reset: resetTranslation
   } = useTranslation((translation) => {
     // Called when translation completes
@@ -108,7 +109,9 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
 
   const handleVideoReady = useCallback((video: HTMLVideoElement) => {
     setVideoElement(video);
-  }, []);
+    // Also set video element for translation hook to capture frames
+    setTranslationVideoElement(video);
+  }, [setTranslationVideoElement]);
 
   const handleLandmarksDetected = useCallback((result: LandmarkResult) => {
     // Pass landmarks to motion detector via translation hook
@@ -179,6 +182,7 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
 function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   const [isTestMode, setIsTestMode] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [quickMode, setQuickModeState] = useState(isQuickMode());
   const hasAutoPlayedRef = useRef(false);
 
   const {
@@ -293,6 +297,12 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
     }
   };
 
+  const handleQuickModeToggle = () => {
+    const newValue = !quickMode;
+    setQuickModeState(newValue);
+    setQuickMode(newValue);
+  };
+
   // Display text - prioritize speech input, then last translation
   const displayText = interimTranscript || finalTranscript || speechTranslation?.spokenText || lastTranslation || 'Listening...';
 
@@ -356,8 +366,19 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
         </div>
 
         {/* Avatar Display - Centered */}
-        <div className="mt-6 flex flex-1 items-center justify-center">
+        <div className="mt-6 flex flex-1 flex-col items-center justify-center">
           <AvatarPlayer className="h-64 w-64" />
+          {/* Quick Mode Toggle */}
+          <button
+            onClick={handleQuickModeToggle}
+            className={`mt-3 rounded-full px-4 py-1.5 text-xs font-medium transition-colors ${
+              quickMode
+                ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+            }`}
+          >
+            {quickMode ? '⚡ Quick Mode (Fast)' : '🤖 AWS GenASL (Slow)'}
+          </button>
         </div>
 
         {/* Test Controls - Phase 3 Demo */}

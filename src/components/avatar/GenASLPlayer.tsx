@@ -65,32 +65,37 @@ export function GenASLPlayer({
       setErrorMessage('');
 
       try {
-        const request: GenASLTranslateRequest = {
-          text,
-          style: 'realistic',
-          quality: 'medium',
-          speed: playbackSpeed,
-        };
+        // Use the local API route which proxies to AWS GenASL
+        const response = await fetch('/api/genasl/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
 
-        const result = await genASLClient.translateTextAndWait(
-          request,
-          (executionStatus) => {
-            setProgress(`Status: ${executionStatus}`);
-          }
-        );
+        const data = await response.json();
 
-        setGlossSequence(result.glossSequence);
+        if (!data.success) {
+          throw new Error(data.error || 'Translation failed');
+        }
+
+        // Extract gloss from text (simple fallback since API doesn't return gloss)
+        const glossSequenceFromText = text.toUpperCase().split(/\s+/).filter(Boolean);
+        setGlossSequence(glossSequenceFromText);
         setStatus('loading');
         setProgress('Loading video...');
 
         // Load and play video
         if (videoRef.current) {
-          videoRef.current.src = result.videoUrl;
+          videoRef.current.src = data.videoUrl;
           videoRef.current.playbackRate = playbackSpeed;
           videoRef.current.load();
         }
 
-        onTranslationComplete?.(result);
+        onTranslationComplete?.({
+          videoUrl: data.videoUrl,
+          glossSequence: glossSequenceFromText,
+          duration: 0,
+        });
       } catch (error) {
         const msg = error instanceof Error ? error.message : 'Translation failed';
         setStatus('error');

@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { translateToGloss, isGeminiConfigured } from '@/lib/gemini';
 import { saveMessage, generateSessionId } from '@/lib/supabase';
 import { USE_MOCK_DATA } from '@/config/constants';
 
@@ -184,7 +183,7 @@ export function useSpeechRecognition(
     };
   }, [isSupported]);
 
-  // Trigger translation with Gemini
+  // Trigger translation via server-side API
   const triggerTranslation = useCallback(async (text: string) => {
     if (isProcessingRef.current || !text.trim()) return;
 
@@ -199,30 +198,44 @@ export function useSpeechRecognition(
     try {
       let result: SpeechTranslationResult;
 
-      // Use Gemini API if configured
-      if (!USE_MOCK_DATA && isGeminiConfigured) {
-        console.log('[Speech] Translating with Gemini (The Linguist):', text);
-        const geminiResult = await translateToGloss(text);
+      // Use server-side API for translation (keeps API keys secure)
+      if (!USE_MOCK_DATA) {
+        console.log('[Speech] Translating via API:', text);
 
-        result = {
-          id: crypto.randomUUID(),
-          spokenText: text,
-          gloss: geminiResult.gloss,
-          source: geminiResult.source,
-        };
+        const response = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          result = {
+            id: crypto.randomUUID(),
+            spokenText: text,
+            gloss: data.gloss,
+            source: data.source === 'gemini' ? 'gemini' : 'mock',
+          };
+        } else {
+          throw new Error(data.error || 'Translation failed');
+        }
       } else {
-        // Mock translation
+        // Mock translation - convert words to uppercase
+        // Handle single letters for fingerspelling
         console.log('[Speech] Using mock translation');
         const mockGloss = text
           .toUpperCase()
-          .split(' ')
-          .filter((word) => word.length > 2)
-          .slice(0, 5);
+          .split(/\s+/)
+          .filter((word) => word.length > 0)
+          .map((word) => word.replace(/[^A-Z]/g, '')) // Remove non-letters
+          .filter((word) => word.length > 0)
+          .slice(0, 10);
 
         result = {
           id: crypto.randomUUID(),
           spokenText: text,
-          gloss: mockGloss.length > 0 ? mockGloss : ['HELLO'],
+          gloss: mockGloss.length > 0 ? mockGloss : [text.toUpperCase() || 'HELLO'],
           source: 'mock',
         };
       }

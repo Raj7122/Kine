@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAvatarPlayer } from '@/hooks/useAvatarPlayer';
 import { FlipbookPlayer } from './FlipbookPlayer';
 import { GenASLPlayer } from './GenASLPlayer';
-import { AlertTriangle } from 'lucide-react';
 import { isGenASLConfigured } from '@/lib/aws/config';
 
 // Avatar rendering modes
@@ -20,12 +19,72 @@ interface AvatarPlayerProps {
   useFlipbook?: boolean;
 }
 
+// Quick mode flag - skips slow AWS calls for faster demos
+let quickModeEnabled = true; // Default to quick mode for faster demos
+
+// Emoji mapping for different glosses
+function getEmojiForGloss(gloss: string): string {
+  const emojiMap: Record<string, string> = {
+    'HELLO': '👋',
+    'HI': '👋',
+    'WORLD': '🌍',
+    'THANK-YOU': '🙏',
+    'THANK': '🙏',
+    'THANKS': '🙏',
+    'YES': '👍',
+    'NO': '👎',
+    'PLEASE': '🙏',
+    'SORRY': '😔',
+    'HELP': '🆘',
+    'LOVE': '❤️',
+    'LIKE': '👍',
+    'GOOD': '👍',
+    'BAD': '👎',
+    'WANT': '🙋',
+    'NEED': '🙋',
+    'HOW': '🤔',
+    'WHAT': '❓',
+    'WHERE': '📍',
+    'WHEN': '⏰',
+    'WHY': '❓',
+    'WHO': '👤',
+    'NAME': '📛',
+    'I': '👆',
+    'YOU': '👉',
+    'WE': '👥',
+    'THEY': '👥',
+  };
+
+  // Check for single letter (fingerspelling)
+  if (gloss.length === 1 && /[A-Z]/.test(gloss)) {
+    return '🤙'; // Fingerspelling hand
+  }
+
+  return emojiMap[gloss.toUpperCase()] || '🤟'; // Default signing hand
+}
+
 // Determine default mode based on configuration
-// For Option B (Gemini Sandwich), default to flipbook
 function getDefaultMode(): AvatarMode {
-  // Option B: Use flipbook as primary, GenASL as optional upgrade
-  // GenASL requires full AWS deployment which we're skipping for hackathon
-  return 'flipbook';
+  // Quick mode uses legacy (fast emoji animation)
+  if (quickModeEnabled) {
+    return 'legacy';
+  }
+  // Use GenASL if configured, otherwise fall back to legacy
+  if (isGenASLConfigured) {
+    return 'genasl';
+  }
+  // Legacy mode shows animated hand emojis with gloss text
+  return 'legacy';
+}
+
+// Export quick mode toggle for external access
+export function setQuickMode(enabled: boolean) {
+  quickModeEnabled = enabled;
+  console.log(`[AvatarPlayer] Quick mode: ${enabled ? 'ON (fast)' : 'OFF (AWS GenASL)'}`);
+}
+
+export function isQuickMode() {
+  return quickModeEnabled;
 }
 
 export function AvatarPlayer({
@@ -127,6 +186,17 @@ export function AvatarPlayer({
     // @ts-expect-error - Expose for testing
     window.getAvatarMode = () => avatarMode;
 
+    // Quick mode toggle - for fast demos without AWS calls
+    // @ts-expect-error - Expose for testing
+    window.setQuickMode = (enabled: boolean) => {
+      setQuickMode(enabled);
+      // Switch mode immediately
+      setAvatarMode(enabled ? 'legacy' : (isGenASLConfigured ? 'genasl' : 'legacy'));
+    };
+
+    // @ts-expect-error - Expose for testing
+    window.isQuickMode = () => quickModeEnabled;
+
     return () => {
       // @ts-expect-error - Cleanup
       delete window.playAvatarSequence;
@@ -138,6 +208,10 @@ export function AvatarPlayer({
       delete window.cycleAvatarMode;
       // @ts-expect-error - Cleanup
       delete window.getAvatarMode;
+      // @ts-expect-error - Cleanup
+      delete window.setQuickMode;
+      // @ts-expect-error - Cleanup
+      delete window.isQuickMode;
     };
   }, [avatarMode, playSequence, stop]);
 
@@ -185,24 +259,6 @@ export function AvatarPlayer({
               </p>
             </motion.div>
           </motion.div>
-        ) : isFallback ? (
-          // Fallback State - Word Not Found
-          <motion.div
-            key={`fallback-${currentGloss}`}
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            transition={{ duration: 0.2 }}
-            className="flex h-48 w-48 flex-col items-center justify-center rounded-full bg-gradient-to-br from-red-500/20 to-red-700/20 border-2 border-red-400/30"
-          >
-            <AlertTriangle className="h-12 w-12 text-red-400" />
-            <p className="mt-2 text-sm font-bold text-red-400">
-              NOT FOUND
-            </p>
-            <p className="text-xs text-red-400/70">
-              {currentGloss}
-            </p>
-          </motion.div>
         ) : (
           // Playing State - Animated Gloss Display
           <motion.div
@@ -213,19 +269,20 @@ export function AvatarPlayer({
             transition={{ duration: 0.3, type: 'spring', stiffness: 200 }}
             className="flex h-48 w-48 flex-col items-center justify-center rounded-full bg-gradient-to-br from-yellow-400/30 to-yellow-600/30 border-2 border-yellow-400/50"
           >
-            {/* Animated signing hands emoji */}
+            {/* Animated signing hands emoji - varies by gloss */}
             <motion.div
               animate={{
-                rotateZ: [0, -10, 10, -10, 0],
-                scale: [1, 1.1, 1]
+                rotateZ: [0, -15, 15, -15, 0],
+                scale: [1, 1.2, 1],
+                y: [0, -5, 0]
               }}
               transition={{
-                duration: getCurrentDuration() / 1000,
+                duration: 0.8,
                 ease: 'easeInOut'
               }}
-              className="text-5xl"
+              className="text-6xl"
             >
-              🤟
+              {getEmojiForGloss(currentGloss || '')}
             </motion.div>
 
             {/* Gloss text */}
@@ -233,7 +290,7 @@ export function AvatarPlayer({
               initial={{ y: 10, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{ delay: 0.1 }}
-              className="mt-2 text-lg font-bold text-yellow-400"
+              className="mt-2 text-xl font-bold text-yellow-400"
             >
               {currentGloss}
             </motion.p>

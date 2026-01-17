@@ -44,10 +44,11 @@ export const AWS_GENASL_CONFIG = {
 };
 
 // Check if AWS GenASL is configured
+// Note: For local testing, only apiEndpoint is required
+// Cognito can be optional for testing purposes
 export const isGenASLConfigured = Boolean(
   AWS_GENASL_CONFIG.apiEndpoint &&
-  AWS_GENASL_CONFIG.region &&
-  AWS_GENASL_CONFIG.identityPoolId
+  AWS_GENASL_CONFIG.region
 );
 
 // GenASL API endpoints
