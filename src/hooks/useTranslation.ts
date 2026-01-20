@@ -13,6 +13,7 @@ import {
   type SignLandmarkData,
   type VideoFrame,
 } from '@/lib/gemini';
+import { synthesizeSpeech, playAudioBlob } from '@/lib/elevenlabs';
 import { saveMessage, generateSessionId } from '@/lib/supabase';
 import { SILENCE_TRIGGER_THRESHOLD, USE_MOCK_DATA, MAX_BUFFER_SIZE } from '@/config/constants';
 
@@ -207,6 +208,24 @@ export function useTranslation(
       landmarkBufferRef.current = [];
       videoFrameBufferRef.current = [];
       frameCounterRef.current = 0;
+
+      // Step 1.5: Audio Synthesis - ElevenLabs TTS
+      // Generate and play audio for the hearing person
+      if (recognizedText) {
+        console.log('[Translation] Step 1.5: ElevenLabs Audio Synthesis');
+        try {
+          const audioResult = await synthesizeSpeech(recognizedText);
+          if (audioResult.success && audioResult.audioBlob) {
+            console.log('[Translation] Playing synthesized audio');
+            await playAudioBlob(audioResult.audioBlob);
+            console.log('[Translation] Audio playback complete');
+          } else {
+            console.log('[Translation] Audio synthesis failed:', audioResult.error);
+          }
+        } catch (audioError) {
+          console.error('[Translation] Audio error:', audioError);
+        }
+      }
 
       // Step 2: Translation - Gemini as "The Linguist"
       // Convert English text to ASL Gloss
