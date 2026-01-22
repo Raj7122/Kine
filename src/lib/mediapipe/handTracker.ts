@@ -4,6 +4,7 @@ import {
   HandLandmarkerResult,
 } from '@mediapipe/tasks-vision';
 import type { HandLandmarkResult } from './types';
+import { MEDIAPIPE_LANDMARK_CONFIDENCE } from '@/config/constants';
 
 let handLandmarker: HandLandmarker | null = null;
 let isInitializing = false;
@@ -38,9 +39,9 @@ export async function initializeHandTracker(): Promise<HandLandmarker> {
       },
       runningMode: 'VIDEO',
       numHands: 2,
-      minHandDetectionConfidence: 0.5,
-      minHandPresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+      minHandDetectionConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
+      minHandPresenceConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
+      minTrackingConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
     });
 
     return handLandmarker;

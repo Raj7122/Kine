@@ -66,11 +66,9 @@ interface ViewProps {
 function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const {
-    setMode,
     setProcessing,
     setLastTranslation,
     setGlossSequence,
-    setShouldAutoPlay
   } = useAppStore();
 
   // Translation hook - handles motion detection and translation triggering
@@ -87,12 +85,13 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
     // Store the translation result
     setLastTranslation(translation.input);
     setGlossSequence(translation.gloss);
-    setShouldAutoPlay(true);
 
-    // Switch to LISTENING mode to play avatar
+    // Reset after a brief delay so user can continue signing
+    // The audio has already played during processing
     setTimeout(() => {
-      setMode('LISTENING');
-    }, 500); // Small delay to show complete state
+      resetTranslation();
+      console.log('[SigningView] Ready for next sign');
+    }, 1500); // Show result briefly, then reset for next sign
   });
 
   // Sync translation state with app store processing state
