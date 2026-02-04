@@ -16,15 +16,27 @@ import {
   MIN_MOTION_THRESHOLD,
 } from '@/config/constants';
 
+// Type for dominant hand preference
+export type DominantHand = 'left' | 'right' | 'auto';
+
+// Module-level dominant hand tracking
+let detectedDominantHand: DominantHand = 'auto';
+let handUsageCount = { left: 0, right: 0 };
+
 /**
  * Flatten hand landmarks into a 1D array of features
- * Format: [x0, y0, z0, x1, y1, z1, ...] for each hand
- * Left hand first, then right hand (padded with zeros if missing)
+ * Research-grade: Focus on single dominant hand (63 features) for better accuracy
+ *
+ * @param handResult MediaPipe hand detection result
+ * @param hasLeft Whether left hand is detected
+ * @param hasRight Whether right hand is detected
+ * @param dominantHand Preferred dominant hand ('left', 'right', or 'auto' for detection)
  */
 function flattenLandmarks(
   handResult: HandLandmarkResult | null,
   hasLeft: boolean,
-  hasRight: boolean
+  hasRight: boolean,
+  dominantHand: DominantHand = 'auto'
 ): number[] {
   const features = new Array<number>(LSTM_FEATURE_COUNT).fill(0);
 
@@ -45,25 +57,43 @@ function flattenLandmarks(
     }
   }
 
-  // Fill features array
-  // Left hand: indices 0-62 (21 landmarks × 3 coords)
-  if (leftHandLandmarks) {
-    for (let i = 0; i < Math.min(21, leftHandLandmarks.length); i++) {
-      const landmark = leftHandLandmarks[i];
-      features[i * 3] = landmark.x;
-      features[i * 3 + 1] = landmark.y;
-      features[i * 3 + 2] = landmark.z ?? 0;
+  // Track hand usage for auto-detection
+  if (dominantHand === 'auto') {
+    if (leftHandLandmarks) handUsageCount.left++;
+    if (rightHandLandmarks) handUsageCount.right++;
+
+    // After 30 frames, determine dominant hand
+    const totalFrames = handUsageCount.left + handUsageCount.right;
+    if (totalFrames >= 30 && detectedDominantHand === 'auto') {
+      detectedDominantHand = handUsageCount.right >= handUsageCount.left ? 'right' : 'left';
+      console.log(`[TemporalBuffer] Detected dominant hand: ${detectedDominantHand}`);
     }
   }
 
-  // Right hand: indices 63-125 (21 landmarks × 3 coords)
-  if (rightHandLandmarks) {
-    for (let i = 0; i < Math.min(21, rightHandLandmarks.length); i++) {
-      const landmark = rightHandLandmarks[i];
-      const baseIndex = 63 + i * 3;
-      features[baseIndex] = landmark.x;
-      features[baseIndex + 1] = landmark.y;
-      features[baseIndex + 2] = landmark.z ?? 0;
+  // Select the hand to use
+  let selectedHand: Landmark[] | null = null;
+
+  const effectiveDominant = dominantHand === 'auto' ? detectedDominantHand : dominantHand;
+
+  if (effectiveDominant === 'left' && leftHandLandmarks) {
+    selectedHand = leftHandLandmarks;
+  } else if (effectiveDominant === 'right' && rightHandLandmarks) {
+    selectedHand = rightHandLandmarks;
+  } else if (effectiveDominant === 'auto') {
+    // Auto mode before detection: prefer right hand (more common)
+    selectedHand = rightHandLandmarks || leftHandLandmarks;
+  } else {
+    // Fallback: use whichever hand is available
+    selectedHand = rightHandLandmarks || leftHandLandmarks;
+  }
+
+  // Fill features array with single hand (63 features: 21 landmarks × 3 coords)
+  if (selectedHand) {
+    for (let i = 0; i < Math.min(21, selectedHand.length); i++) {
+      const landmark = selectedHand[i];
+      features[i * 3] = landmark.x;
+      features[i * 3 + 1] = landmark.y;
+      features[i * 3 + 2] = landmark.z ?? 0;
     }
   }
 
@@ -71,17 +101,37 @@ function flattenLandmarks(
 }
 
 /**
+ * Reset dominant hand detection (useful when user changes)
+ */
+export function resetDominantHandDetection(): void {
+  detectedDominantHand = 'auto';
+  handUsageCount = { left: 0, right: 0 };
+}
+
+/**
+ * Get the currently detected dominant hand
+ */
+export function getDetectedDominantHand(): DominantHand {
+  return detectedDominantHand;
+}
+
+/**
+ * Manually set the dominant hand preference
+ */
+export function setDominantHand(hand: DominantHand): void {
+  detectedDominantHand = hand;
+}
+
+/**
  * Normalize landmarks to be wrist-centered and unit-scaled
  * This makes the model invariant to hand position and size
+ * Research-grade: Single hand focus (63 features)
  */
 function normalizeLandmarks(features: number[]): number[] {
   const normalized = [...features];
 
-  // Process left hand (indices 0-62)
+  // Process single dominant hand (indices 0-62, 21 landmarks × 3 coords)
   normalizeHand(normalized, 0, 63);
-
-  // Process right hand (indices 63-125)
-  normalizeHand(normalized, 63, 126);
 
   return normalized;
 }
