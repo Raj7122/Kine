@@ -13,7 +13,7 @@ import { AvatarPlayer, isQuickMode, setQuickMode } from '@/components/avatar/Ava
 import { SettingsModal, HistoryModal } from '@/components/modals';
 import { TRANSITION_DURATION } from '@/config/constants';
 import type { LandmarkResult } from '@/lib/mediapipe';
-import { useTranslation, type TranslationState } from '@/hooks/useTranslation';
+import { useSigningModeTranslation, type TranslationState } from '@/hooks/useSigningModeTranslation';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { Play, Square, Mic, MicOff } from 'lucide-react';
 
@@ -71,14 +71,17 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
     setGlossSequence,
   } = useAppStore();
 
-  // Translation hook - handles motion detection and translation triggering
+  // Translation hook - handles motion detection, LSTM, and translation triggering
   const {
     state: translationState,
     silenceProgress,
     processLandmarks,
     setVideoElement: setTranslationVideoElement,
-    reset: resetTranslation
-  } = useTranslation((translation) => {
+    reset: resetTranslation,
+    lstmPrediction,
+    lstmEnabled,
+    isDynamicModeActive,
+  } = useSigningModeTranslation((translation) => {
     // Called when translation completes
     console.log('[SigningView] Translation complete:', translation);
 
@@ -104,7 +107,9 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
     // Store translation state in a way TranscriptionBox can access
     (window as unknown as { __translationState: TranslationState }).__translationState = translationState;
     (window as unknown as { __silenceProgress: number }).__silenceProgress = silenceProgress;
-  }, [translationState, silenceProgress]);
+    (window as unknown as { __lstmPrediction: typeof lstmPrediction }).__lstmPrediction = lstmPrediction;
+    (window as unknown as { __isDynamicMode: boolean }).__isDynamicMode = isDynamicModeActive;
+  }, [translationState, silenceProgress, lstmPrediction, isDynamicModeActive]);
 
   const handleVideoReady = useCallback((video: HTMLVideoElement) => {
     setVideoElement(video);
@@ -157,15 +162,27 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
 
         {/* Silence Progress Indicator - Shows when pause detected */}
         {translationState === 'pause_detected' && (
-          <div className="mb-4 flex justify-center">
+          <div className="mb-4 flex flex-col items-center">
             <div className="h-1 w-48 overflow-hidden rounded-full bg-gray-700">
               <motion.div
-                className="h-full bg-yellow-400"
+                className={`h-full ${isDynamicModeActive ? 'bg-green-400' : 'bg-yellow-400'}`}
                 initial={{ width: 0 }}
                 animate={{ width: `${silenceProgress * 100}%` }}
                 transition={{ duration: 0.1 }}
               />
             </div>
+            {isDynamicModeActive && (
+              <span className="mt-1 text-xs text-green-400">Dynamic sign detected</span>
+            )}
+          </div>
+        )}
+
+        {/* LSTM Prediction Indicator */}
+        {lstmPrediction && lstmEnabled && (
+          <div className="mb-2 flex justify-center">
+            <span className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-medium text-green-400">
+              LSTM: {lstmPrediction.class} ({Math.round(lstmPrediction.confidence * 100)}%)
+            </span>
           </div>
         )}
 

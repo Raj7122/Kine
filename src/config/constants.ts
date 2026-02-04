@@ -61,3 +61,31 @@ export const AVATAR_FALLBACK_URL = "/assets/video/fallback.mp4";
 // UI constants
 export const MODE_TOGGLE_SIZE = "h-20 w-20"; // Thumb zone button size
 export const TRANSITION_DURATION = 0.3; // seconds for view transitions
+
+// =============================================================================
+// LSTM Dynamic Gesture Recognition
+// =============================================================================
+
+export const LSTM_WINDOW_SIZE = 32;           // frames (1.07s at 30fps)
+export const LSTM_STRIDE = 15;                // frames between inferences
+export const LSTM_MIN_MOTION_FRAMES = 8;      // minimum frames with motion to trigger
+export const LSTM_CONFIDENCE_THRESHOLD = 0.7; // prediction threshold
+export const LSTM_MODEL_PATH = '/models/asl_lstm_25.json';
+export const LSTM_FEATURE_COUNT = 126;        // 21 landmarks × 3 coords × 2 hands
+
+// Dynamic mode detection thresholds
+// When LSTM buffer has accumulated motion frames, use extended stillness threshold
+// to allow dynamic signs to complete before triggering translation
+export const DYNAMIC_MODE_STILLNESS_THRESHOLD = 1500; // ms - extended stillness for dynamic signs
+export const DYNAMIC_MODE_BUFFER_THRESHOLD = 8;       // frames - minimum motion frames to trigger dynamic mode
+
+// LSTM vocabulary (25 common dynamic signs)
+export const LSTM_VOCABULARY = [
+  'HELLO', 'GOODBYE', 'PLEASE', 'THANK_YOU', 'SORRY',
+  'WANT', 'NEED', 'HELP', 'LIKE', 'UNDERSTAND',
+  'WHAT', 'WHERE', 'WHO', 'WHEN', 'WHY', 'HOW',
+  'YES', 'NO', 'MAYBE', 'GOOD', 'BAD',
+  'I', 'YOU', 'NAME', 'FINISH',
+] as const;
+
+export type LSTMSignClass = typeof LSTM_VOCABULARY[number];

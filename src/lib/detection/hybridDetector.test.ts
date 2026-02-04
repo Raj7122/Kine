@@ -5,6 +5,8 @@ vi.mock('@/config/constants', () => ({
   ROBOFLOW_TEMPORAL_WINDOW: 3,
   ROBOFLOW_CONFIDENCE_THRESHOLD: 0.5,
   ROBOFLOW_HIGH_CONFIDENCE: 0.85,
+  LSTM_CONFIDENCE_THRESHOLD: 0.7,
+  MIN_MOTION_THRESHOLD: 0.023,
 }));
 
 // Mock roboflow module
