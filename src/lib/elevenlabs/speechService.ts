@@ -11,7 +11,8 @@ export const isElevenLabsConfigured = !!(
 
 // Default voice settings
 const DEFAULT_VOICE_ID = '21m00Tcm4TlvDq8ikWAM'; // Rachel - default female voice
-const DEFAULT_MODEL_ID = 'eleven_monolingual_v1';
+// Using eleven_turbo_v2_5 - fast, high-quality, available on free tier
+const DEFAULT_MODEL_ID = 'eleven_turbo_v2_5';
 
 export interface VoiceSettings {
   stability: number;
@@ -24,6 +25,7 @@ export interface TextToSpeechOptions {
   voiceId?: string;
   modelId?: string;
   voiceSettings?: VoiceSettings;
+  languageCode?: string;
 }
 
 export interface SpeechToTextResult {
@@ -50,6 +52,7 @@ export async function textToSpeech(
     voiceId = DEFAULT_VOICE_ID,
     modelId = DEFAULT_MODEL_ID,
     voiceSettings = defaultVoiceSettings,
+    languageCode = 'en', // Default to English to prevent auto-detection issues
   } = options;
 
   console.log('[ElevenLabs] Converting text to speech:', text.substring(0, 50));
@@ -72,6 +75,7 @@ export async function textToSpeech(
           text,
           model_id: modelId,
           voice_settings: voiceSettings,
+          language_code: languageCode,
         }),
       }
     );

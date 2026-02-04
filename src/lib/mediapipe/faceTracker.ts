@@ -4,6 +4,7 @@ import {
   FaceLandmarkerResult,
 } from '@mediapipe/tasks-vision';
 import type { FaceLandmarkResult } from './types';
+import { MEDIAPIPE_LANDMARK_CONFIDENCE } from '@/config/constants';
 
 let faceLandmarker: FaceLandmarker | null = null;
 let isInitializing = false;
@@ -38,9 +39,9 @@ export async function initializeFaceTracker(): Promise<FaceLandmarker> {
       },
       runningMode: 'VIDEO',
       numFaces: 1,
-      minFaceDetectionConfidence: 0.5,
-      minFacePresenceConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+      minFaceDetectionConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
+      minFacePresenceConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
+      minTrackingConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
       outputFaceBlendshapes: true,
     });
 

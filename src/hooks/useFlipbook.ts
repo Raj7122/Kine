@@ -153,6 +153,10 @@ export function useFlipbook(): UseFlipbookReturn {
           isLoading: false,
           error: `No flipbook data for ${gloss}`,
         }));
+        // Still call onComplete after a delay so the queue can continue
+        setTimeout(() => {
+          options.onComplete?.();
+        }, 1000); // Show error for 1 second then continue
         return;
       }
 
@@ -179,6 +183,10 @@ export function useFlipbook(): UseFlipbookReturn {
           isLoading: false,
           error: 'Failed to load frames',
         }));
+        // Still call onComplete after a delay so the queue can continue
+        setTimeout(() => {
+          options.onComplete?.();
+        }, 1000);
         return;
       }
 

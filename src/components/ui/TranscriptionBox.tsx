@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
-import type { TranslationState } from '@/hooks/useTranslation';
+import type { TranslationState } from '@/hooks/useSigningModeTranslation';
 
 interface TranscriptionBoxProps {
   translationState?: TranslationState;
