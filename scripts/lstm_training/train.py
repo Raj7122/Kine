@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-Training Script for ASL LSTM Model
+Training Script for Research-Grade ASL CNN-LSTM Model
+
+Based on validated research:
+- Indian ISL: 97.75% precision
+- FAU: 98% accuracy
 
 Usage:
     python train.py --data ./data/processed --output ./models
-    python train.py --data ./data/processed --output ./models --epochs 100 --batch-size 32
+    python train.py --data ./data/processed --output ./models --epochs 150 --optimizer adamw
 """
 
 import argparse
@@ -17,7 +21,13 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
-from model import create_model, compile_model, create_learning_rate_schedule, count_parameters
+from model import (
+    create_model,
+    create_cnn_lstm_model,
+    compile_model,
+    create_learning_rate_schedule,
+    count_parameters,
+)
 
 
 def load_data(data_dir: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict]:
@@ -42,7 +52,7 @@ def load_data(data_dir: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.nd
 
 def create_callbacks(
     output_dir: Path,
-    patience: int = 10,
+    patience: int = 15,
     min_delta: float = 0.001,
 ) -> list:
     """Create training callbacks."""
@@ -223,21 +233,28 @@ def save_training_results(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train ASL LSTM model')
+    parser = argparse.ArgumentParser(
+        description='Train research-grade ASL CNN-LSTM model'
+    )
     parser.add_argument('--data', type=str, default='./data/processed',
                         help='Directory with preprocessed data')
     parser.add_argument('--output', type=str, default='./models',
                         help='Output directory for trained model')
-    parser.add_argument('--epochs', type=int, default=100,
-                        help='Maximum training epochs')
+    parser.add_argument('--epochs', type=int, default=150,
+                        help='Maximum training epochs (default: 150)')
     parser.add_argument('--batch-size', type=int, default=32,
                         help='Training batch size')
     parser.add_argument('--lr', type=float, default=0.001,
                         help='Initial learning rate')
-    parser.add_argument('--patience', type=int, default=10,
-                        help='Early stopping patience')
+    parser.add_argument('--patience', type=int, default=15,
+                        help='Early stopping patience (default: 15)')
     parser.add_argument('--no-attention', action='store_true',
                         help='Disable attention mechanism')
+    parser.add_argument('--optimizer', type=str, default='adamw',
+                        choices=['adam', 'adamw'],
+                        help='Optimizer to use (default: adamw for research-grade)')
+    parser.add_argument('--legacy-model', action='store_true',
+                        help='Use legacy Bi-LSTM model instead of CNN-LSTM')
     args = parser.parse_args()
 
     data_dir = Path(args.data)
@@ -249,10 +266,13 @@ def main():
 
     # Create output directory with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_dir = output_dir / f'run_{timestamp}'
+    model_type = 'lstm' if args.legacy_model else 'cnn_lstm'
+    output_dir = output_dir / f'run_{model_type}_{timestamp}'
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Training run: {output_dir}")
+    print(f"Model type: {'Legacy Bi-LSTM' if args.legacy_model else 'Research-grade CNN-LSTM'}")
+    print(f"Optimizer: {args.optimizer.upper()}")
 
     # Load data
     print("\nLoading data...")
@@ -262,17 +282,27 @@ def main():
     print(f"  Val: {X_val.shape} samples")
     print(f"  Test: {X_test.shape} samples")
     print(f"  Classes: {len(metadata['vocabulary'])}")
+    print(f"  Window size: {metadata['window_size']} frames")
+    print(f"  Feature count: {metadata['feature_count']} (single hand: {metadata.get('single_hand', False)})")
 
     # Create model
     print("\nCreating model...")
     num_classes = len(metadata['vocabulary'])
 
-    model = create_model(
-        num_classes=num_classes,
-        window_size=metadata['window_size'],
-        feature_count=metadata['feature_count'],
-        use_attention=not args.no_attention,
-    )
+    if args.legacy_model:
+        model = create_model(
+            num_classes=num_classes,
+            window_size=metadata['window_size'],
+            feature_count=metadata['feature_count'],
+            use_attention=not args.no_attention,
+        )
+    else:
+        model = create_cnn_lstm_model(
+            num_classes=num_classes,
+            window_size=metadata['window_size'],
+            feature_count=metadata['feature_count'],
+            use_attention=not args.no_attention,
+        )
 
     # Calculate decay steps based on dataset size
     steps_per_epoch = len(X_train) // args.batch_size
@@ -283,7 +313,14 @@ def main():
         decay_steps=decay_steps,
     )
 
-    optimizer = keras.optimizers.Adam(learning_rate=lr_schedule)
+    # Create optimizer
+    if args.optimizer == 'adamw':
+        optimizer = keras.optimizers.AdamW(
+            learning_rate=lr_schedule,
+            weight_decay=0.01,
+        )
+    else:
+        optimizer = keras.optimizers.Adam(learning_rate=lr_schedule)
 
     model.compile(
         optimizer=optimizer,
@@ -334,10 +371,12 @@ def main():
     model.save(output_dir / 'final_model', save_format='tf')  # SavedModel format for TF.js
 
     print(f"\nTraining complete!")
+    print(f"  Model type: {'Legacy Bi-LSTM' if args.legacy_model else 'Research-grade CNN-LSTM'}")
     print(f"  Best validation accuracy: {max(history.history['val_accuracy']):.4f}")
     print(f"  Test accuracy: {eval_results['test_accuracy']:.4f}")
     print(f"  Model saved to: {output_dir}")
     print(f"\nNext step: Run export_tfjs.py to convert to TensorFlow.js format")
+    print(f"  Expected model name: asl_{'lstm' if args.legacy_model else 'cnn_lstm'}_25.json")
 
 
 if __name__ == '__main__':

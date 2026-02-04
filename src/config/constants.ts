@@ -16,7 +16,7 @@ export const LANDMARK_SAMPLING_RATE = 33; // ms between inference runs (30 FPS)
 export const LANDMARK_SMOOTHING_FACTOR = 0.85; // Exponential smoothing for fluid motion
 
 // MediaPipe confidence thresholds
-export const MEDIAPIPE_LANDMARK_CONFIDENCE = 0.68; // Reliable finger tracking
+export const MEDIAPIPE_LANDMARK_CONFIDENCE = 0.80; // Research-grade confidence (from 0.68)
 
 // Motion detection
 export const MIN_MOTION_THRESHOLD = 0.023; // ~15px / 640px normalized - captures subtle movements
@@ -29,6 +29,13 @@ export const HAND_SEPARATION_DISTANCE = 0.031; // ~20px / 640px normalized - pre
 export const OCCLUSION_TOLERANCE_FRAMES = 3; // Continuous tracking through brief occlusions
 
 // =============================================================================
+// Depth Tracking (z-axis velocity smoothing)
+// =============================================================================
+export const HAND_SIZE_VARIANCE_THRESHOLD = 0.15; // Maximum acceptable hand size variance
+export const MAX_Z_VELOCITY = 2.0; // Maximum z-axis velocity (normalized units/frame)
+export const VELOCITY_SMOOTHING = 0.80; // Exponential smoothing for velocity calculations
+
+// =============================================================================
 // Roboflow YOLO Configuration
 // =============================================================================
 
@@ -39,6 +46,7 @@ export const ROBOFLOW_TEMPORAL_WINDOW = 3; // Frames for temporal smoothing
 export const ROBOFLOW_INFERENCE_INTERVAL = 33; // Match 30fps
 export const ROBOFLOW_MAX_CONCURRENT = 2; // Max concurrent API requests
 export const ROBOFLOW_IMAGE_SIZE = 640; // Input image size
+export const ROBOFLOW_HIGH_ACCURACY_SIZE = 1280; // High-accuracy mode input size
 
 // =============================================================================
 // Translation Settings
@@ -63,15 +71,32 @@ export const MODE_TOGGLE_SIZE = "h-20 w-20"; // Thumb zone button size
 export const TRANSITION_DURATION = 0.3; // seconds for view transitions
 
 // =============================================================================
-// LSTM Dynamic Gesture Recognition
+// LSTM Dynamic Gesture Recognition (Research-Grade CNN-LSTM Architecture)
 // =============================================================================
 
-export const LSTM_WINDOW_SIZE = 32;           // frames (1.07s at 30fps)
-export const LSTM_STRIDE = 15;                // frames between inferences
-export const LSTM_MIN_MOTION_FRAMES = 8;      // minimum frames with motion to trigger
+export const LSTM_WINDOW_SIZE = 16;           // frames (~530ms at 30fps - research optimal)
+export const LSTM_STRIDE = 8;                 // 50% overlap for dense inference
+export const LSTM_MIN_MOTION_FRAMES = 4;      // reduced for smaller window
 export const LSTM_CONFIDENCE_THRESHOLD = 0.7; // prediction threshold
-export const LSTM_MODEL_PATH = '/models/asl_lstm_25.json';
-export const LSTM_FEATURE_COUNT = 126;        // 21 landmarks × 3 coords × 2 hands
+export const LSTM_MODEL_PATH = '/models/asl_cnn_lstm_25.json';
+export const LSTM_FEATURE_COUNT = 63;         // 21 landmarks × 3 coords × 1 dominant hand
+
+// CNN-LSTM Architecture Constants
+export const CNN_FILTERS = 128;               // Conv1D filters
+export const CNN_KERNEL_SIZE = 3;             // Conv1D kernel size
+export const LSTM_UNITS_FORWARD = 128;        // Bidirectional LSTM units (forward)
+export const LSTM_UNITS_BACKWARD = 128;       // Bidirectional LSTM units (backward)
+export const DENSE_HIDDEN_UNITS = [128, 64] as const; // Dense layer sizes
+export const DROPOUT_CNN = 0.3;               // CNN dropout rate
+export const DROPOUT_DENSE_1 = 0.5;           // First dense dropout
+export const DROPOUT_DENSE_2 = 0.3;           // Second dense dropout
+
+// =============================================================================
+// Ensemble Fusion Weights
+// =============================================================================
+export const YOLO_FUSION_WEIGHT = 0.60;       // YOLO contribution to ensemble
+export const MEDIAPIPE_FUSION_WEIGHT = 0.40;  // MediaPipe contribution to ensemble
+export const ENSEMBLE_AGREEMENT_BOOST = 0.15; // Confidence boost when sources agree
 
 // Dynamic mode detection thresholds
 // When LSTM buffer has accumulated motion frames, use extended stillness threshold

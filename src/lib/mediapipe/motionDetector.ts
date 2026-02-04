@@ -7,13 +7,18 @@ import {
   MAX_ACCELERATION,
   HAND_SEPARATION_DISTANCE,
   OCCLUSION_TOLERANCE_FRAMES,
+  MAX_Z_VELOCITY,
+  VELOCITY_SMOOTHING,
 } from '@/config/constants';
 
 /**
  * Landmark smoother using exponential smoothing for fluid motion
+ * Enhanced with velocity smoothing for research-grade accuracy
  */
 class LandmarkSmoother {
   private smoothedLandmarks: Map<string, Landmark> = new Map();
+  private smoothedVelocities: Map<string, { vx: number; vy: number; vz: number }> = new Map();
+  private previousLandmarks: Map<string, Landmark> = new Map();
   private smoothingFactor: number;
 
   constructor(smoothingFactor: number = LANDMARK_SMOOTHING_FACTOR) {
@@ -21,7 +26,7 @@ class LandmarkSmoother {
   }
 
   /**
-   * Apply exponential smoothing to landmarks
+   * Apply exponential smoothing to landmarks with velocity tracking
    * smoothed = alpha * current + (1 - alpha) * previous
    */
   smooth(landmarks: Landmark[][], handIndex: number): Landmark[][] {
@@ -29,26 +34,71 @@ class LandmarkSmoother {
       return hand.map((landmark, lIdx) => {
         const key = `${handIndex}_${hIdx}_${lIdx}`;
         const previous = this.smoothedLandmarks.get(key);
+        const prevRaw = this.previousLandmarks.get(key);
 
         if (!previous) {
           this.smoothedLandmarks.set(key, { ...landmark });
+          this.previousLandmarks.set(key, { ...landmark });
           return landmark;
         }
 
+        // Calculate raw velocity
+        const rawVx = landmark.x - (prevRaw?.x ?? landmark.x);
+        const rawVy = landmark.y - (prevRaw?.y ?? landmark.y);
+        const rawVz = (landmark.z ?? 0) - (prevRaw?.z ?? 0);
+
+        // Smooth velocity using exponential smoothing
+        const smoothedVel = this.smoothVelocity(key, rawVx, rawVy, rawVz);
+
+        // Clamp z-velocity to prevent unrealistic depth jumps
+        const clampedVz = Math.max(-MAX_Z_VELOCITY, Math.min(MAX_Z_VELOCITY, smoothedVel.vz));
+
+        // Apply smoothed landmark position
         const smoothed: Landmark = {
           x: this.smoothingFactor * landmark.x + (1 - this.smoothingFactor) * previous.x,
           y: this.smoothingFactor * landmark.y + (1 - this.smoothingFactor) * previous.y,
-          z: this.smoothingFactor * (landmark.z ?? 0) + (1 - this.smoothingFactor) * (previous.z ?? 0),
+          z: this.smoothingFactor * ((landmark.z ?? 0) + clampedVz - smoothedVel.vz) +
+             (1 - this.smoothingFactor) * (previous.z ?? 0),
         };
 
         this.smoothedLandmarks.set(key, smoothed);
+        this.previousLandmarks.set(key, { ...landmark });
         return smoothed;
       });
     });
   }
 
+  /**
+   * Apply exponential smoothing to velocity for stability
+   */
+  private smoothVelocity(
+    key: string,
+    rawVx: number,
+    rawVy: number,
+    rawVz: number
+  ): { vx: number; vy: number; vz: number } {
+    const prevVel = this.smoothedVelocities.get(key);
+
+    if (!prevVel) {
+      const vel = { vx: rawVx, vy: rawVy, vz: rawVz };
+      this.smoothedVelocities.set(key, vel);
+      return vel;
+    }
+
+    const smoothedVel = {
+      vx: VELOCITY_SMOOTHING * rawVx + (1 - VELOCITY_SMOOTHING) * prevVel.vx,
+      vy: VELOCITY_SMOOTHING * rawVy + (1 - VELOCITY_SMOOTHING) * prevVel.vy,
+      vz: VELOCITY_SMOOTHING * rawVz + (1 - VELOCITY_SMOOTHING) * prevVel.vz,
+    };
+
+    this.smoothedVelocities.set(key, smoothedVel);
+    return smoothedVel;
+  }
+
   reset(): void {
     this.smoothedLandmarks.clear();
+    this.smoothedVelocities.clear();
+    this.previousLandmarks.clear();
   }
 }
 
@@ -159,6 +209,7 @@ export class MotionDetector {
 
   /**
    * Calculate motion with acceleration-based artifact filtering
+   * Enhanced with z-axis velocity checking for research-grade accuracy
    */
   private calculateMotionWithAccelerationFilter(
     current: Landmark[][],
@@ -167,6 +218,7 @@ export class MotionDetector {
     let totalMotion = 0;
     let pointCount = 0;
     let filteredPoints = 0;
+    let zVelocityFiltered = 0;
 
     const handsToCompare = Math.min(current.length, previous.length);
 
@@ -184,6 +236,12 @@ export class MotionDetector {
         const dx = curr.x - prev.x;
         const dy = curr.y - prev.y;
         const dz = (curr.z ?? 0) - (prev.z ?? 0);
+
+        // Check for unrealistic z-velocity (depth tracking artifacts)
+        if (Math.abs(dz) > MAX_Z_VELOCITY) {
+          zVelocityFiltered++;
+          continue;
+        }
 
         // Use Z_AXIS_SMOOTHING for depth weight
         const distance = Math.sqrt(dx * dx + dy * dy + (dz * dz * Z_AXIS_SMOOTHING));
@@ -206,8 +264,10 @@ export class MotionDetector {
       }
     }
 
-    if (filteredPoints > 0) {
-      console.debug(`Filtered ${filteredPoints} points due to excessive acceleration`);
+    if (filteredPoints > 0 || zVelocityFiltered > 0) {
+      console.debug(
+        `Filtered ${filteredPoints} points (acceleration), ${zVelocityFiltered} points (z-velocity)`
+      );
     }
 
     return pointCount > 0 ? totalMotion / pointCount : 0;

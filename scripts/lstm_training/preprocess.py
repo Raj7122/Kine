@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """
-Data Preprocessing Script
-Preprocesses extracted landmarks for LSTM training.
+Data Preprocessing Script for Research-Grade ASL Recognition
+Preprocesses extracted landmarks for CNN-LSTM training.
 
 Features:
+- Single dominant hand extraction (63 features)
 - Wrist-centered normalization
 - Unit bounding box scaling
+- Overlapping windows (50% overlap)
 - Data augmentation (time warping, spatial jitter, dropout)
-- Sequence padding/truncation
+
+Research basis:
+- Indian ISL: 97.75% precision
+- FAU: 98% accuracy
 
 Usage:
     python preprocess.py --input ./data/landmarks --output ./data/processed
@@ -22,31 +27,75 @@ import numpy as np
 from tqdm import tqdm
 
 
-# Constants
-WINDOW_SIZE = 32  # Must match LSTM_WINDOW_SIZE in TypeScript
-FEATURE_COUNT = 126  # 21 landmarks × 3 coords × 2 hands
+# Constants - Research-grade values
+WINDOW_SIZE = 16  # ~530ms at 30fps (research optimal)
+STRIDE = 8        # 50% overlap for dense sampling
+FEATURE_COUNT = 63  # 21 landmarks × 3 coords × 1 dominant hand
+
+# Legacy constants for backward compatibility
+LEGACY_WINDOW_SIZE = 32
+LEGACY_FEATURE_COUNT = 126
 
 
-def normalize_landmarks(landmarks: np.ndarray) -> np.ndarray:
+def extract_dominant_hand(landmarks: np.ndarray) -> np.ndarray:
+    """
+    Extract single dominant hand from two-hand landmarks.
+    Prefers right hand (more common for signing).
+
+    Args:
+        landmarks: Array of shape (n_frames, 126) with both hands
+
+    Returns:
+        Array of shape (n_frames, 63) with dominant hand only
+    """
+    n_frames = len(landmarks)
+    single_hand = np.zeros((n_frames, 63), dtype=np.float32)
+
+    for frame_idx in range(n_frames):
+        frame = landmarks[frame_idx]
+
+        # Check if right hand has data (indices 63-125)
+        right_wrist = frame[63:66]
+        left_wrist = frame[0:3]
+
+        has_right = not (right_wrist[0] == 0 and right_wrist[1] == 0 and right_wrist[2] == 0)
+        has_left = not (left_wrist[0] == 0 and left_wrist[1] == 0 and left_wrist[2] == 0)
+
+        if has_right:
+            # Use right hand
+            single_hand[frame_idx] = frame[63:126]
+        elif has_left:
+            # Use left hand
+            single_hand[frame_idx] = frame[0:63]
+        # else: keep zeros (no hand detected)
+
+    return single_hand
+
+
+def normalize_landmarks(landmarks: np.ndarray, single_hand: bool = True) -> np.ndarray:
     """
     Normalize landmarks to be wrist-centered and unit-scaled.
 
     Args:
-        landmarks: Array of shape (n_frames, 126)
+        landmarks: Array of shape (n_frames, 63) or (n_frames, 126)
+        single_hand: If True, assumes single hand (63 features)
 
     Returns:
         Normalized array of same shape
     """
     normalized = landmarks.copy()
+    feature_count = landmarks.shape[1] if len(landmarks.shape) > 1 else FEATURE_COUNT
 
     for frame_idx in range(len(normalized)):
         frame = normalized[frame_idx]
 
-        # Normalize left hand (indices 0-62)
-        normalize_hand(frame, 0, 63)
-
-        # Normalize right hand (indices 63-125)
-        normalize_hand(frame, 63, 126)
+        if single_hand or feature_count == 63:
+            # Single dominant hand (indices 0-62)
+            normalize_hand(frame, 0, 63)
+        else:
+            # Legacy: both hands
+            normalize_hand(frame, 0, 63)
+            normalize_hand(frame, 63, 126)
 
     return normalized
 
@@ -90,6 +139,7 @@ def pad_or_truncate(
 ) -> np.ndarray:
     """Pad or truncate sequence to target length."""
     n_frames = len(landmarks)
+    feature_count = landmarks.shape[1] if len(landmarks.shape) > 1 else FEATURE_COUNT
 
     if n_frames == target_length:
         return landmarks
@@ -100,8 +150,50 @@ def pad_or_truncate(
         return landmarks[start:start + target_length]
 
     # Pad with zeros at the beginning
-    padding = np.zeros((target_length - n_frames, FEATURE_COUNT), dtype=np.float32)
+    padding = np.zeros((target_length - n_frames, feature_count), dtype=np.float32)
     return np.concatenate([padding, landmarks], axis=0)
+
+
+def create_overlapping_windows(
+    landmarks: np.ndarray,
+    window_size: int = WINDOW_SIZE,
+    stride: int = STRIDE,
+) -> List[np.ndarray]:
+    """
+    Create overlapping windows from a sequence of landmarks.
+    This provides more training samples and denser temporal coverage.
+
+    Args:
+        landmarks: Array of shape (n_frames, features)
+        window_size: Size of each window
+        stride: Step between windows (stride < window_size = overlap)
+
+    Returns:
+        List of window arrays, each of shape (window_size, features)
+    """
+    n_frames = len(landmarks)
+    windows = []
+
+    if n_frames < window_size:
+        # Sequence too short - pad and return single window
+        windows.append(pad_or_truncate(landmarks, window_size))
+        return windows
+
+    # Create overlapping windows
+    start = 0
+    while start + window_size <= n_frames:
+        window = landmarks[start:start + window_size]
+        windows.append(window)
+        start += stride
+
+    # Handle remaining frames (if any) by creating a final window from the end
+    if start < n_frames and start + window_size > n_frames:
+        final_window = landmarks[-window_size:]
+        # Only add if it's different from the last window
+        if len(windows) == 0 or not np.array_equal(windows[-1], final_window):
+            windows.append(final_window)
+
+    return windows
 
 
 def time_warp(landmarks: np.ndarray, factor_range: Tuple[float, float] = (0.8, 1.2)) -> np.ndarray:
@@ -109,7 +201,7 @@ def time_warp(landmarks: np.ndarray, factor_range: Tuple[float, float] = (0.8, 1
     Apply time warping augmentation.
 
     Args:
-        landmarks: Array of shape (n_frames, 126)
+        landmarks: Array of shape (n_frames, features)
         factor_range: Range of speed factors (0.8 = slower, 1.2 = faster)
 
     Returns:
@@ -117,6 +209,7 @@ def time_warp(landmarks: np.ndarray, factor_range: Tuple[float, float] = (0.8, 1
     """
     factor = np.random.uniform(*factor_range)
     n_frames = len(landmarks)
+    feature_count = landmarks.shape[1] if len(landmarks.shape) > 1 else FEATURE_COUNT
     new_length = int(n_frames * factor)
 
     if new_length == n_frames or new_length < 2:
@@ -126,9 +219,9 @@ def time_warp(landmarks: np.ndarray, factor_range: Tuple[float, float] = (0.8, 1
     old_indices = np.arange(n_frames)
     new_indices = np.linspace(0, n_frames - 1, new_length)
 
-    warped = np.zeros((new_length, FEATURE_COUNT), dtype=np.float32)
+    warped = np.zeros((new_length, feature_count), dtype=np.float32)
 
-    for feature_idx in range(FEATURE_COUNT):
+    for feature_idx in range(feature_count):
         warped[:, feature_idx] = np.interp(new_indices, old_indices, landmarks[:, feature_idx])
 
     return warped
@@ -154,26 +247,29 @@ def landmark_dropout(landmarks: np.ndarray, dropout_prob: float = 0.1) -> np.nda
     Randomly zero out landmarks to simulate occlusion.
 
     Args:
-        landmarks: Array of shape (n_frames, 126)
+        landmarks: Array of shape (n_frames, features)
         dropout_prob: Probability of dropping each landmark
 
     Returns:
         Array with some landmarks zeroed
     """
     augmented = landmarks.copy()
+    feature_count = landmarks.shape[1] if len(landmarks.shape) > 1 else FEATURE_COUNT
+    single_hand = feature_count == 63
 
     # Create dropout mask for each frame
     for frame_idx in range(len(augmented)):
         for landmark_idx in range(21):  # 21 landmarks per hand
             if np.random.random() < dropout_prob:
-                # Zero out this landmark for both hands
-                # Left hand
+                # Zero out this landmark
                 base_idx = landmark_idx * 3
                 augmented[frame_idx, base_idx:base_idx + 3] = 0
 
-                # Right hand
-                base_idx = 63 + landmark_idx * 3
-                augmented[frame_idx, base_idx:base_idx + 3] = 0
+                # Also drop from second hand if present (legacy mode)
+                if not single_hand and feature_count > 63:
+                    base_idx = 63 + landmark_idx * 3
+                    if base_idx + 3 <= feature_count:
+                        augmented[frame_idx, base_idx:base_idx + 3] = 0
 
     return augmented
 
@@ -220,14 +316,18 @@ def process_sample(
     landmarks_path: Path,
     augment: bool = True,
     augment_config: Optional[dict] = None,
+    use_overlapping_windows: bool = True,
+    single_hand: bool = True,
 ) -> List[np.ndarray]:
     """
-    Process a single landmark file.
+    Process a single landmark file with research-grade preprocessing.
 
     Args:
         landmarks_path: Path to .npy file
         augment: Whether to apply augmentation
         augment_config: Augmentation configuration
+        use_overlapping_windows: Use 50% overlapping windows for dense sampling
+        single_hand: Extract single dominant hand (63 features)
 
     Returns:
         List of processed samples
@@ -238,8 +338,12 @@ def process_sample(
     if len(landmarks) == 0:
         return []
 
+    # Extract single dominant hand if requested
+    if single_hand and landmarks.shape[1] > 63:
+        landmarks = extract_dominant_hand(landmarks)
+
     # Normalize
-    normalized = normalize_landmarks(landmarks)
+    normalized = normalize_landmarks(landmarks, single_hand=single_hand)
 
     # Augment if requested
     if augment and augment_config:
@@ -247,8 +351,14 @@ def process_sample(
     else:
         samples = [normalized]
 
-    # Pad/truncate all samples to fixed length
-    processed = [pad_or_truncate(s, WINDOW_SIZE) for s in samples]
+    # Create overlapping windows or pad/truncate
+    processed = []
+    for sample in samples:
+        if use_overlapping_windows:
+            windows = create_overlapping_windows(sample, WINDOW_SIZE, STRIDE)
+            processed.extend(windows)
+        else:
+            processed.append(pad_or_truncate(sample, WINDOW_SIZE))
 
     return processed
 
@@ -259,9 +369,11 @@ def create_dataset(
     output_dir: Path,
     vocabulary: List[str],
     augment_train: bool = True,
+    use_overlapping_windows: bool = True,
+    single_hand: bool = True,
 ) -> dict:
     """
-    Create processed dataset from splits.
+    Create processed dataset from splits with research-grade preprocessing.
 
     Args:
         splits: Dict with 'train', 'val', 'test' splits
@@ -269,6 +381,8 @@ def create_dataset(
         output_dir: Output directory for processed data
         vocabulary: List of sign labels (for label encoding)
         augment_train: Whether to augment training data
+        use_overlapping_windows: Use 50% overlapping windows
+        single_hand: Extract single dominant hand (63 features)
 
     Returns:
         Dataset statistics
@@ -286,6 +400,7 @@ def create_dataset(
     }
 
     stats = {}
+    feature_count = 63 if single_hand else 126
 
     for split_name, samples in splits.items():
         print(f"\nProcessing {split_name} split...")
@@ -307,11 +422,13 @@ def create_dataset(
             if not landmarks_path.exists():
                 continue
 
-            # Process sample
+            # Process sample with research-grade preprocessing
             processed_samples = process_sample(
                 landmarks_path,
                 augment=should_augment,
                 augment_config=augment_config,
+                use_overlapping_windows=use_overlapping_windows,
+                single_hand=single_hand,
             )
 
             for processed in processed_samples:
@@ -348,7 +465,10 @@ def create_dataset(
         'vocabulary': vocabulary,
         'label_to_idx': label_to_idx,
         'window_size': WINDOW_SIZE,
-        'feature_count': FEATURE_COUNT,
+        'stride': STRIDE,
+        'feature_count': feature_count,
+        'single_hand': single_hand,
+        'overlapping_windows': use_overlapping_windows,
         'stats': stats,
     }
 
@@ -359,13 +479,19 @@ def create_dataset(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Preprocess landmarks for LSTM training')
+    parser = argparse.ArgumentParser(
+        description='Preprocess landmarks for CNN-LSTM training (research-grade)'
+    )
     parser.add_argument('--input', type=str, default='./data/landmarks',
                         help='Input directory with landmark files')
     parser.add_argument('--output', type=str, default='./data/processed',
                         help='Output directory for processed data')
     parser.add_argument('--no-augment', action='store_true',
                         help='Disable data augmentation')
+    parser.add_argument('--no-overlap', action='store_true',
+                        help='Disable overlapping windows (use single window per sample)')
+    parser.add_argument('--both-hands', action='store_true',
+                        help='Use both hands (legacy 126 features) instead of dominant hand')
     args = parser.parse_args()
 
     input_dir = Path(args.input)
@@ -394,6 +520,11 @@ def main():
 
     print(f"Vocabulary: {len(vocabulary)} signs")
     print(f"Signs: {vocabulary}")
+    print(f"\nResearch-grade preprocessing:")
+    print(f"  Window size: {WINDOW_SIZE} frames (~{WINDOW_SIZE/30*1000:.0f}ms at 30fps)")
+    print(f"  Stride: {STRIDE} frames (50% overlap)")
+    print(f"  Features: {'63 (single dominant hand)' if not args.both_hands else '126 (both hands)'}")
+    print(f"  Overlapping windows: {'disabled' if args.no_overlap else 'enabled'}")
 
     # Create dataset
     stats = create_dataset(
@@ -402,6 +533,8 @@ def main():
         output_dir,
         vocabulary,
         augment_train=not args.no_augment,
+        use_overlapping_windows=not args.no_overlap,
+        single_hand=not args.both_hands,
     )
 
     print(f"\nPreprocessing complete!")

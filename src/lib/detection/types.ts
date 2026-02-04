@@ -16,6 +16,13 @@ export type FusionAction =
   | 'enhance_gemini'   // Pass hints to Gemini for arbitration
   | 'rely_gemini';     // No confident detection, use Gemini
 
+export interface ComponentConfidences {
+  yolo?: number;
+  mediapipe?: number;
+  lstm?: number;
+  gemini?: number;
+}
+
 export interface FusionOutput {
   action: FusionAction;
   sign?: string;           // Detected sign/letter
@@ -23,6 +30,8 @@ export interface FusionOutput {
   confidence?: number;
   source?: DetectionSource;
   lstmPrediction?: LSTMPrediction | null;  // Include LSTM result for context
+  ensembleConfidence?: number;             // Combined ensemble confidence score
+  componentConfidences?: ComponentConfidences; // Individual source confidences
 }
 
 export interface HybridDetectionResult {
