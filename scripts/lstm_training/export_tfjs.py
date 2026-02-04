@@ -214,7 +214,7 @@ def main():
                         help='Path to trained model (SavedModel dir or .keras file)')
     parser.add_argument('--output', type=str, default='../public/models',
                         help='Output directory for TF.js model')
-    parser.add_argument('--name', type=str, default='asl_lstm_25',
+    parser.add_argument('--name', type=str, default='asl_cnn_lstm_25',
                         help='Model name (used for output subdirectory)')
     parser.add_argument('--quantization', type=str, default='float16',
                         choices=['float16', 'uint8', 'none'],
