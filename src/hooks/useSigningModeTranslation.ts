@@ -1,25 +1,24 @@
 'use client';
 
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { MotionDetector, type LandmarkResult } from '@/lib/mediapipe';
-import { getMockTranslation } from '@/lib/translation';
+import { MotionDetector, type LandmarkResult, type GestureResult } from '@/lib/mediapipe';
 import {
   translateToGloss,
   isGeminiConfigured,
-  recognizeSign,
+} from '@/lib/gemini';
+import {
+  recognizeSignWithOpenAI,
   createLandmarkBuffer,
-  isGeminiMultimodalConfigured,
   captureVideoFrame,
   type SignLandmarkData,
   type VideoFrame,
-} from '@/lib/gemini';
+} from '@/lib/openai';
 import { synthesizeSpeech, playAudioBlob } from '@/lib/elevenlabs';
 import { saveMessage, generateSessionId } from '@/lib/supabase';
 import {
   SILENCE_TRIGGER_THRESHOLD,
   DYNAMIC_MODE_STILLNESS_THRESHOLD,
   DYNAMIC_MODE_BUFFER_THRESHOLD,
-  USE_MOCK_DATA,
   MAX_BUFFER_SIZE,
   LSTM_CONFIDENCE_THRESHOLD,
 } from '@/config/constants';
@@ -38,9 +37,12 @@ export interface TranslationResult {
   input: string;
   gloss: string[];
   category: string;
-  source: 'gemini' | 'gemini-vision' | 'mock';
+  source: 'gesture' | 'openai' | 'openai-vision' | 'gemini' | 'gemini-vision' | 'mock';
   lstmHint?: string | null;
 }
+
+// Minimum confidence for gesture-based recognition
+const GESTURE_CONFIDENCE_THRESHOLD = 0.75;
 
 export interface UseSigningModeTranslationReturn {
   // Translation state
@@ -48,10 +50,17 @@ export interface UseSigningModeTranslationReturn {
   translation: TranslationResult | null;
   silenceProgress: number;
 
+  // Gesture state (MediaPipe - fast, offline)
+  currentGesture: GestureResult | null;
+
   // LSTM state
   lstmPrediction: LSTMPrediction | null;
   lstmEnabled: boolean;
   isLSTMLoading: boolean;
+
+  // Buffer stats (for debugging UI)
+  landmarkBufferSize: number;
+  videoFrameBufferSize: number;
 
   // Actions
   processLandmarks: (result: LandmarkResult) => void;
@@ -75,8 +84,8 @@ const VIDEO_CAPTURE_INTERVAL = 4;
  * Combined hook for SIGNING_MODE that orchestrates:
  * - LSTM dynamic gesture detection
  * - Motion detection with dynamic threshold
- * - Gemini sign recognition with LSTM hints
- * - Audio synthesis
+ * - OpenAI GPT-4o sign recognition with LSTM hints (supports sentences!)
+ * - Audio synthesis via ElevenLabs
  *
  * This hook solves the timing mismatch between motion detection
  * and LSTM inference by using dynamic stillness thresholds.
@@ -89,6 +98,14 @@ export function useSigningModeTranslation(
   const [translation, setTranslation] = useState<TranslationResult | null>(null);
   const [silenceProgress, setSilenceProgress] = useState(0);
   const [isDynamicModeActive, setIsDynamicModeActive] = useState(false);
+
+  // Buffer stats for debugging UI
+  const [landmarkBufferSize, setLandmarkBufferSize] = useState(0);
+  const [videoFrameBufferSize, setVideoFrameBufferSize] = useState(0);
+
+  // Gesture state (MediaPipe - fast, offline)
+  const [currentGesture, setCurrentGesture] = useState<GestureResult | null>(null);
+  const lastGestureRef = useRef<GestureResult | null>(null);
 
   // LSTM detection hook
   const lstmDetection = useLSTMDetection({
@@ -103,6 +120,7 @@ export function useSigningModeTranslation(
   // Refs
   const motionDetectorRef = useRef<MotionDetector>(new MotionDetector());
   const silenceStartRef = useRef<number | null>(null);
+  const handsLostTimeRef = useRef<number | null>(null); // Track when hands left frame
   const isProcessingRef = useRef(false);
   const landmarkBufferRef = useRef<SignLandmarkData[]>([]);
   const videoFrameBufferRef = useRef<VideoFrame[]>([]);
@@ -121,11 +139,40 @@ export function useSigningModeTranslation(
     console.log('[SigningModeTranslation] Session ID:', sessionId);
   }
 
+  // Track video element availability for independent capture
+  const [hasVideoElement, setHasVideoElement] = useState(false);
+
   // Set video element for frame capture
   const setVideoElement = useCallback((video: HTMLVideoElement | null) => {
     videoElementRef.current = video;
+    setHasVideoElement(!!video);
     console.log('[SigningModeTranslation] Video element set:', !!video);
   }, []);
+
+  // Independent video frame capture (100ms = 10 FPS) - ensures consistent frame capture
+  // regardless of how fast/slow MediaPipe detection runs
+  const isCapturingRef = useRef(false);
+  useEffect(() => {
+    if (!hasVideoElement || !videoElementRef.current) return;
+
+    const captureInterval = setInterval(() => {
+      // Only capture if we're actively signing (not idle or processing)
+      if (isProcessingRef.current || !isCapturingRef.current) return;
+      if (!videoElementRef.current) return;
+
+      const videoFrame = captureVideoFrame(videoElementRef.current);
+      if (videoFrame) {
+        videoFrameBufferRef.current.push(videoFrame);
+        // Keep buffer at reasonable size
+        if (videoFrameBufferRef.current.length > 60) {
+          videoFrameBufferRef.current = videoFrameBufferRef.current.slice(-60);
+        }
+        setVideoFrameBufferSize(videoFrameBufferRef.current.length);
+      }
+    }, 100); // 10 FPS independent capture
+
+    return () => clearInterval(captureInterval);
+  }, [hasVideoElement]);
 
   /**
    * Get LSTM hint for Gemini sign recognition
@@ -145,6 +192,7 @@ export function useSigningModeTranslation(
     if (isProcessingRef.current) return;
 
     isProcessingRef.current = true;
+    isCapturingRef.current = false; // Stop frame capture during processing
     setState('processing');
     silenceStartRef.current = null;
     setSilenceProgress(0);
@@ -153,12 +201,19 @@ export function useSigningModeTranslation(
     try {
       let result: TranslationResult;
       let recognizedText: string;
-      let recognitionSource: 'gemini' | 'gemini-vision' | 'mock' = 'mock';
+      let recognitionSource: 'gesture' | 'openai' | 'openai-vision' | 'gemini' | 'gemini-vision' | 'mock' = 'mock';
       const lstmHint = getLSTMHint();
 
-      // Step 1: Sign Recognition - Gemini as "The Eyes"
-      if (!USE_MOCK_DATA && isGeminiMultimodalConfigured && landmarkBufferRef.current.length > 5) {
-        console.log('[SigningModeTranslation] Step 1: Gemini Sign Recognition with LSTM context');
+      // Step 0: Check for MediaPipe gesture (FAST - no API call!)
+      const gestureResult = lastGestureRef.current;
+      if (gestureResult && gestureResult.confidence >= GESTURE_CONFIDENCE_THRESHOLD && gestureResult.gesture !== 'None') {
+        console.log('[SigningModeTranslation] Using MediaPipe gesture:', gestureResult.gesture, '->', gestureResult.aslMeaning);
+        recognizedText = gestureResult.aslMeaning;
+        recognitionSource = 'gesture';
+      }
+      // Step 1: Fall back to OpenAI GPT-4o for complex signs/sentences
+      else if (landmarkBufferRef.current.length > 5) {
+        console.log('[SigningModeTranslation] Step 1: OpenAI GPT-4o Sign Recognition');
         if (lstmHint) {
           console.log('[SigningModeTranslation] LSTM hint:', lstmHint);
         }
@@ -166,24 +221,32 @@ export function useSigningModeTranslation(
         const buffer = createLandmarkBuffer(
           landmarkBufferRef.current,
           videoFrameBufferRef.current,
-          40
+          100 // More frames for sentence recognition
         );
 
-        // Pass LSTM hint to Gemini for improved accuracy
-        const recognition = await recognizeSign(buffer, lstmHint);
+        console.log('[SigningModeTranslation] Sending to OpenAI:', {
+          landmarkFrames: buffer.frames.length,
+          videoFrames: buffer.videoFrames.length,
+          duration: buffer.endTime - buffer.startTime + 'ms',
+        });
+
+        // Pass LSTM hint to OpenAI for improved accuracy
+        const recognition = await recognizeSignWithOpenAI(buffer, lstmHint);
         recognizedText = recognition.text;
         recognitionSource = recognition.source;
 
-        console.log('[SigningModeTranslation] Recognized:', recognizedText, '(source:', recognition.source, ')');
-      } else if (!USE_MOCK_DATA && isGeminiConfigured) {
-        console.log('[SigningModeTranslation] Sign recognition not available, using placeholder');
-        recognizedText = 'Hello, how are you?';
-        recognitionSource = 'mock';
+        // If unclear, skip audio and show feedback
+        if (recognition.unclear || !recognition.text) {
+          console.log('[SigningModeTranslation] Unclear gesture - skipping audio');
+          recognizedText = '';
+        } else {
+          console.log('[SigningModeTranslation] Recognized:', recognizedText, '(source:', recognition.source, ')');
+        }
       } else {
-        const mockPhrases = ['Hello', 'Thank you', 'How are you?', 'Nice to meet you'];
-        recognizedText = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
-        console.log('[SigningModeTranslation] Mock recognition:', recognizedText);
-        recognitionSource = 'mock';
+        // Not enough frames captured
+        console.log('[SigningModeTranslation] Not enough frames for recognition');
+        recognizedText = '';
+        recognitionSource = 'gesture';
       }
 
       // Clear buffers after processing
@@ -195,7 +258,10 @@ export function useSigningModeTranslation(
       lstmDetectionRef.current.reset();
 
       // Step 1.5: Audio Synthesis - ElevenLabs TTS
-      if (recognizedText) {
+      // Skip audio for empty or unclear responses
+      const isValidRecognition = recognizedText && recognizedText.trim().length > 0;
+
+      if (isValidRecognition) {
         console.log('[SigningModeTranslation] Step 1.5: ElevenLabs Audio Synthesis');
         try {
           const audioResult = await synthesizeSpeech(recognizedText);
@@ -209,11 +275,13 @@ export function useSigningModeTranslation(
         } catch (audioError) {
           console.error('[SigningModeTranslation] Audio error:', audioError);
         }
+      } else {
+        console.log('[SigningModeTranslation] Skipping audio for unclear recognition:', recognizedText);
       }
 
-      // Step 2: Translation - Gemini as "The Linguist"
-      if (!USE_MOCK_DATA && isGeminiConfigured) {
-        console.log('[SigningModeTranslation] Step 2: Gemini Translation');
+      // Step 2: Translation - Gemini as "The Linguist" (convert English to ASL gloss)
+      if (recognizedText && isGeminiConfigured) {
+        console.log('[SigningModeTranslation] Step 2: Gemini Translation to Gloss');
         const geminiResult = await translateToGloss(recognizedText);
 
         result = {
@@ -226,14 +294,13 @@ export function useSigningModeTranslation(
         };
         console.log('[SigningModeTranslation] Gloss sequence:', result.gloss);
       } else {
-        console.log('[SigningModeTranslation] Using mock translation');
-        const mockResult = await getMockTranslation(1000);
+        // No text to translate or Gemini not configured
         result = {
-          id: mockResult.id,
-          input: recognizedText,
-          gloss: mockResult.gloss,
-          category: mockResult.category,
-          source: 'mock',
+          id: crypto.randomUUID(),
+          input: recognizedText || 'No sign detected',
+          gloss: recognizedText ? [recognizedText.toUpperCase().replace(/ /g, '_')] : [],
+          category: 'translation',
+          source: recognitionSource,
           lstmHint,
         };
       }
@@ -273,19 +340,64 @@ export function useSigningModeTranslation(
       const detector = motionDetectorRef.current;
       detector.update(result.hands);
 
-      // No hands detected
+      // Track gesture from MediaPipe (fast, offline recognition)
+      if (result.gesture) {
+        setCurrentGesture(result.gesture);
+        lastGestureRef.current = result.gesture;
+      } else if (currentGesture) {
+        // Clear gesture after a short delay
+        setCurrentGesture(null);
+      }
+
+      // No hands detected - check if we should trigger translation
       if (!result.hands) {
+        // If we have enough buffered frames, wait a moment then trigger translation
+        const hasSigningData = landmarkBufferRef.current.length > 10 && videoFrameBufferRef.current.length > 3;
+
+        if (hasSigningData && !isProcessingRef.current) {
+          // Start or continue tracking hands-lost time
+          if (!handsLostTimeRef.current) {
+            handsLostTimeRef.current = Date.now();
+            setState('pause_detected');
+            console.log('[SigningModeTranslation] Hands left frame - waiting to confirm...');
+          }
+
+          // Wait 300ms to confirm hands are really gone (not just a glitch)
+          const handsLostDuration = Date.now() - handsLostTimeRef.current;
+          const confirmThreshold = 300; // ms
+
+          // Update progress (quick fill to show "processing soon")
+          setSilenceProgress(Math.min(handsLostDuration / confirmThreshold, 1));
+
+          if (handsLostDuration >= confirmThreshold) {
+            console.log('[SigningModeTranslation] Hands confirmed gone - triggering translation');
+            console.log('[SigningModeTranslation] Buffers - Landmarks:', landmarkBufferRef.current.length, 'Video frames:', videoFrameBufferRef.current.length);
+            handsLostTimeRef.current = null;
+            triggerTranslation();
+          }
+          return;
+        }
+
+        // No significant signing data - just reset
         setState('idle');
         silenceStartRef.current = null;
+        handsLostTimeRef.current = null;
         setSilenceProgress(0);
         setIsDynamicModeActive(false);
-        if (landmarkBufferRef.current.length > 0) {
-          landmarkBufferRef.current = [];
-          videoFrameBufferRef.current = [];
-          frameCounterRef.current = 0;
-        }
+        lastGestureRef.current = null;
+        setCurrentGesture(null);
+        landmarkBufferRef.current = [];
+        videoFrameBufferRef.current = [];
+        frameCounterRef.current = 0;
+        setLandmarkBufferSize(0);
+        setVideoFrameBufferSize(0);
+        isCapturingRef.current = false; // Stop independent frame capture
         return;
       }
+
+      // Hands detected - reset hands-lost timer and enable frame capture
+      handsLostTimeRef.current = null;
+      isCapturingRef.current = true; // Start independent frame capture
 
       // Feed LSTM detection (if enabled)
       if (lstmDetectionRef.current.isEnabled) {
@@ -300,14 +412,15 @@ export function useSigningModeTranslation(
       };
       landmarkBufferRef.current.push(frameData);
 
-      // Capture video frame at intervals
+      // Capture video frame on EVERY landmark detection (since detection is already ~4-5 FPS)
       frameCounterRef.current++;
-      if (frameCounterRef.current % VIDEO_CAPTURE_INTERVAL === 0 && videoElementRef.current) {
+      if (videoElementRef.current) {
         const videoFrame = captureVideoFrame(videoElementRef.current);
         if (videoFrame) {
           videoFrameBufferRef.current.push(videoFrame);
-          if (videoFrameBufferRef.current.length > 20) {
-            videoFrameBufferRef.current = videoFrameBufferRef.current.slice(-20);
+          // Keep more frames for better temporal context (up to 60 frames)
+          if (videoFrameBufferRef.current.length > 60) {
+            videoFrameBufferRef.current = videoFrameBufferRef.current.slice(-60);
           }
         }
       }
@@ -316,6 +429,10 @@ export function useSigningModeTranslation(
       if (landmarkBufferRef.current.length > MAX_BUFFER_SIZE) {
         landmarkBufferRef.current = landmarkBufferRef.current.slice(-MAX_BUFFER_SIZE);
       }
+
+      // Update buffer sizes for debug UI
+      setLandmarkBufferSize(landmarkBufferRef.current.length);
+      setVideoFrameBufferSize(videoFrameBufferRef.current.length);
 
       // Check if still (low motion)
       if (detector.isStill()) {
@@ -379,7 +496,7 @@ export function useSigningModeTranslation(
         }
       }
     },
-    [triggerTranslation, isDynamicModeActive]
+    [triggerTranslation, isDynamicModeActive, currentGesture]
   );
 
   /**
@@ -390,8 +507,14 @@ export function useSigningModeTranslation(
     setTranslation(null);
     setSilenceProgress(0);
     setIsDynamicModeActive(false);
+    setCurrentGesture(null);
+    setLandmarkBufferSize(0);
+    setVideoFrameBufferSize(0);
+    lastGestureRef.current = null;
     silenceStartRef.current = null;
+    handsLostTimeRef.current = null;
     isProcessingRef.current = false;
+    isCapturingRef.current = false; // Stop independent frame capture
     motionDetectorRef.current.reset();
     landmarkBufferRef.current = [];
     videoFrameBufferRef.current = [];
@@ -442,10 +565,17 @@ export function useSigningModeTranslation(
     translation,
     silenceProgress,
 
+    // Gesture state (MediaPipe - fast, offline)
+    currentGesture,
+
     // LSTM state
     lstmPrediction: lstmDetection.lastPrediction,
     lstmEnabled: lstmDetection.isEnabled,
     isLSTMLoading: lstmDetection.isModelLoading,
+
+    // Buffer stats (for debugging UI)
+    landmarkBufferSize,
+    videoFrameBufferSize,
 
     // Actions
     processLandmarks,

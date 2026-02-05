@@ -16,7 +16,7 @@ export const LANDMARK_SAMPLING_RATE = 33; // ms between inference runs (30 FPS)
 export const LANDMARK_SMOOTHING_FACTOR = 0.85; // Exponential smoothing for fluid motion
 
 // MediaPipe confidence thresholds
-export const MEDIAPIPE_LANDMARK_CONFIDENCE = 0.80; // Research-grade confidence (from 0.68)
+export const MEDIAPIPE_LANDMARK_CONFIDENCE = 0.65; // Balanced confidence for better detection rate
 
 // Motion detection
 export const MIN_MOTION_THRESHOLD = 0.023; // ~15px / 640px normalized - captures subtle movements
@@ -52,8 +52,9 @@ export const ROBOFLOW_HIGH_ACCURACY_SIZE = 1280; // High-accuracy mode input siz
 // Translation Settings
 // =============================================================================
 
-export const SILENCE_TRIGGER_THRESHOLD = 1200; // ms of no motion to trigger translation
+export const SILENCE_TRIGGER_THRESHOLD = 1500; // ms of no motion to trigger translation (longer for phrases)
 export const MAX_BUFFER_SIZE = 120; // max frames to buffer (4 sec at 30 FPS)
+export const MIN_PHRASE_FRAMES = 25; // minimum frames needed to consider a phrase (vs single sign)
 
 // Sign recognition settings
 export const SIGN_RECOGNITION_FRAME_COUNT = 5; // number of video frames to send to Gemini
@@ -101,7 +102,7 @@ export const ENSEMBLE_AGREEMENT_BOOST = 0.15; // Confidence boost when sources a
 // Dynamic mode detection thresholds
 // When LSTM buffer has accumulated motion frames, use extended stillness threshold
 // to allow dynamic signs to complete before triggering translation
-export const DYNAMIC_MODE_STILLNESS_THRESHOLD = 1500; // ms - extended stillness for dynamic signs
+export const DYNAMIC_MODE_STILLNESS_THRESHOLD = 1000; // ms - extended stillness for dynamic signs (faster)
 export const DYNAMIC_MODE_BUFFER_THRESHOLD = 8;       // frames - minimum motion frames to trigger dynamic mode
 
 // LSTM vocabulary (25 common dynamic signs)
