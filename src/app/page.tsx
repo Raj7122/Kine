@@ -65,6 +65,7 @@ interface ViewProps {
 
 function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  const [lastCompletedTranslationId, setLastCompletedTranslationId] = useState<string | null>(null);
   const {
     setProcessing,
     setLastTranslation,
@@ -83,16 +84,23 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
     console.log('[SigningView] Translation complete:', translation);
 
     // Store the translation result
-    setLastTranslation(translation.input);
+    setLastCompletedTranslationId(translation.id);
+    setLastTranslation(translation.recognition);
     setGlossSequence(translation.gloss);
+  });
 
-    // Reset after a brief delay so user can continue signing
-    // The audio has already played during processing
-    setTimeout(() => {
+  // Reset after a brief delay so user can continue signing
+  // The audio has already played during processing
+  useEffect(() => {
+    if (translationState !== 'complete') return;
+
+    const timeout = setTimeout(() => {
       resetTranslation();
       console.log('[SigningView] Ready for next sign');
     }, 1500); // Show result briefly, then reset for next sign
-  });
+
+    return () => clearTimeout(timeout);
+  }, [translationState, resetTranslation]);
 
   // Sync translation state with app store processing state
   useEffect(() => {
@@ -171,7 +179,10 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
 
         {/* Transcription Box - positioned above bottom bar */}
         <div className="mb-[22vh] flex justify-center">
-          <TranscriptionBox translationState={translationState} />
+          <TranscriptionBox
+            translationState={translationState}
+            translationId={lastCompletedTranslationId}
+          />
         </div>
       </div>
     </motion.div>
@@ -303,7 +314,12 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   };
 
   // Display text - prioritize speech input, then last translation
-  const displayText = interimTranscript || finalTranscript || speechTranslation?.spokenText || lastTranslation || 'Listening...';
+  const displayText =
+    interimTranscript ||
+    finalTranscript ||
+    speechTranslation?.spokenText ||
+    lastTranslation?.text ||
+    'Listening...';
 
   // Sub text based on state
   const getSubText = () => {
@@ -419,7 +435,7 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
                 </button>
               </div>
               <p className="mt-2 text-xs text-gray-500">
-                Or use console: <code className="text-yellow-400/70">playAvatarSequence(['HELLO', 'WORLD'])</code>
+                Or use console: <code className="text-yellow-400/70">playAvatarSequence([&quot;HELLO&quot;, &quot;WORLD&quot;])</code>
               </p>
             </motion.div>
           )}

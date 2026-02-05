@@ -13,7 +13,7 @@ import type { HandLandmarkResult, FaceLandmarkResult } from '@/lib/mediapipe/typ
 import { SIGN_RECOGNITION_FRAME_COUNT, SIGN_RECOGNITION_MAX_LANDMARKS } from '@/config/constants';
 
 // Gemini API configuration
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_VISION_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
 
 export const isGeminiMultimodalConfigured = !!(
@@ -72,7 +72,7 @@ export interface SignRecognitionResult {
 /**
  * Enhanced system prompt for ASL interpretation with handshape references
  */
-const ASL_INTERPRETATION_PROMPT = `You are an expert American Sign Language (ASL) interpreter with deep knowledge of ASL linguistics.
+export const ASL_INTERPRETATION_PROMPT = `You are an expert American Sign Language (ASL) interpreter with deep knowledge of ASL linguistics.
 
 You will receive:
 1. Video frames showing someone signing in ASL
@@ -138,7 +138,13 @@ Pay attention to:
 - PINKY: MCP(17), PIP(18), DIP(19), TIP(20)
 
 ## Fingerspelling (Single Letters)
-When a handshape is held STATIC (no movement), it's likely fingerspelling a letter:
+Use the FULL sequence (all frames) to decide if this is fingerspelling.
+
+If the ENTIRE sequence is mostly STATIC (no meaningful movement) and matches ONE letter handshape throughout, output that single letter.
+
+If you see MULTIPLE distinct letter handshapes across frames (fingerspelling a word), output the combined word by concatenating the letters with NO spaces (e.g., "C A T" → "CAT").
+
+Common single-letter handshapes:
 - **Y**: Thumb and pinky extended, others closed → Return "Y" (the letter)
 - **A**: Fist with thumb alongside → Return "A"
 - **B**: Flat hand, fingers together, thumb tucked → Return "B"
@@ -150,15 +156,16 @@ When a handshape is held STATIC (no movement), it's likely fingerspelling a lett
 - **W**: Index, middle, ring extended → Return "W"
 
 ## Instructions
-1. FIRST check if this is a STATIC handshape (fingerspelling a letter)
-   - If hand is mostly still and matches a letter handshape, return just the letter (e.g., "Y")
-2. If there is MOVEMENT, it's likely a sign - match to known ASL signs
+1. Determine if this clip is fingerspelling or a lexical sign by analyzing the FULL sequence (all frames).
+   - Only output a single letter if the sequence is overwhelmingly static and matches one letter handshape throughout.
+   - If multiple letter handshapes appear, output the concatenated word (no spaces).
+2. If there is meaningful MOVEMENT, location change, or a clear sign pattern, prefer the sign meaning.
 3. Analyze the video frames to see the actual hand shapes and movements
 4. Use landmark data to confirm precise finger positions
 5. Note any facial expressions for grammatical context
 
 Return ONLY the English translation of what is being signed.
-- For fingerspelled letters, return just the letter: "Y", "A", "B", etc.
+- For fingerspelling, return either a single letter (e.g., "Y") or the concatenated word (e.g., "CAT").
 - For signs, return the English meaning: "Hello", "Thank you", etc.
 - Do NOT return colors or objects unless the person is clearly signing about them.`;
 
@@ -198,7 +205,7 @@ export function captureVideoFrame(video: HTMLVideoElement): VideoFrame | null {
 /**
  * Format ALL landmark data for Gemini input (all 21 landmarks per hand + face)
  */
-function formatLandmarksForPrompt(buffer: LandmarkBuffer): string {
+export function formatLandmarksForPrompt(buffer: LandmarkBuffer): string {
   const frameDescriptions: string[] = [];
 
   // Sample frames evenly across the buffer

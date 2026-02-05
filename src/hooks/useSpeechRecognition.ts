@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useRef, useState, useEffect } from 'react';
-import { saveMessage, generateSessionId } from '@/lib/supabase';
+import { saveMessage } from '@/lib/supabase';
 import { USE_MOCK_DATA } from '@/config/constants';
+import { useAppStore } from '@/store/useAppStore';
 
 // Web Speech API types
 interface SpeechRecognitionEvent extends Event {
@@ -74,9 +75,6 @@ export interface UseSpeechRecognitionReturn {
   reset: () => void;
 }
 
-// Session ID for message tracking
-let sessionId: string | null = null;
-
 /**
  * Hook for speech recognition and translation to ASL gloss
  * Part of "The Gemini Sandwich" - LISTENING_MODE flow
@@ -84,6 +82,7 @@ let sessionId: string | null = null;
 export function useSpeechRecognition(
   onTranslationComplete?: (result: SpeechTranslationResult) => void
 ): UseSpeechRecognitionReturn {
+  const storeSessionId = useAppStore((state) => state.sessionId);
   const [state, setState] = useState<SpeechState>('idle');
   const [isListening, setIsListening] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -93,11 +92,6 @@ export function useSpeechRecognition(
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const isProcessingRef = useRef(false);
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Initialize session ID
-  if (!sessionId) {
-    sessionId = generateSessionId();
-  }
 
   // Check if speech recognition is supported
   const isSupported = typeof window !== 'undefined' &&
@@ -245,9 +239,9 @@ export function useSpeechRecognition(
       setState('complete');
 
       // Save to database (non-blocking)
-      if (sessionId) {
+      if (storeSessionId) {
         saveMessage({
-          session_id: sessionId,
+          session_id: storeSessionId,
           direction: 'audio_to_sign',
           original_text: text,
           translated_text: result.gloss.join(' '),
@@ -264,7 +258,7 @@ export function useSpeechRecognition(
     } finally {
       isProcessingRef.current = false;
     }
-  }, [onTranslationComplete]);
+  }, [onTranslationComplete, storeSessionId]);
 
   // Start listening
   const startListening = useCallback(() => {

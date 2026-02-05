@@ -50,3 +50,6 @@ __pycache__/
 
 # Supabase
 supabase/.temp/
+
+# Internal documentation
+ARCHITECTURE.md

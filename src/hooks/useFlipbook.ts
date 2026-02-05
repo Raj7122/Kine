@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { FlipbookEntry, FlipbookState, FlipbookPlaybackOptions } from '@/lib/avatar/types';
-import { FRAME_DURATION_MS } from '@/lib/avatar/types';
 import {
   getFlipbookEntry,
   preloadFlipbook,
@@ -41,7 +40,7 @@ export function useFlipbook(): UseFlipbookReturn {
   const [currentFrameImage, setCurrentFrameImage] = useState<HTMLImageElement | null>(null);
 
   // Animation loop using requestAnimationFrame
-  const animate = useCallback((timestamp: number) => {
+  const animate = useCallback(function animate(timestamp: number) {
     if (isPausedRef.current) {
       animationFrameRef.current = requestAnimationFrame(animate);
       return;

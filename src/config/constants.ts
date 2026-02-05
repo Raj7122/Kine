@@ -44,12 +44,12 @@ export const ROBOFLOW_IMAGE_SIZE = 640; // Input image size
 // Translation Settings
 // =============================================================================
 
-export const SILENCE_TRIGGER_THRESHOLD = 1200; // ms of no motion to trigger translation
-export const MAX_BUFFER_SIZE = 120; // max frames to buffer (4 sec at 30 FPS)
+export const SILENCE_TRIGGER_THRESHOLD = 1800; // ms of no motion to trigger translation (longer for motion signs)
+export const MAX_BUFFER_SIZE = 180; // max frames to buffer (6 sec at 30 FPS)
 
 // Sign recognition settings
-export const SIGN_RECOGNITION_FRAME_COUNT = 5; // number of video frames to send to Gemini
-export const SIGN_RECOGNITION_MAX_LANDMARKS = 40; // max landmark frames to send
+export const SIGN_RECOGNITION_FRAME_COUNT = 10; // number of video frames to send to Gemini (more for motion signs)
+export const SIGN_RECOGNITION_MAX_LANDMARKS = 60; // max landmark frames to send
 
 // =============================================================================
 // Avatar & UI

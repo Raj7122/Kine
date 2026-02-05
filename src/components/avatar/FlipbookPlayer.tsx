@@ -53,7 +53,7 @@ export function FlipbookPlayer({
   }, [currentFrameImage]);
 
   // Play next item in queue
-  const playNext = useCallback(() => {
+  const playNext = useCallback(function playNext() {
     const nextIndex = currentIndex + 1;
 
     if (nextIndex >= queue.length) {

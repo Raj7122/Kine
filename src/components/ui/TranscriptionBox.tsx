@@ -1,18 +1,38 @@
 'use client';
 
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
+import { FeedbackButtons } from '@/components/feedback';
 import type { TranslationState } from '@/hooks/useTranslation';
 
 interface TranscriptionBoxProps {
   translationState?: TranslationState;
+  translationId?: string | null;
 }
 
-export function TranscriptionBox({ translationState = 'idle' }: TranscriptionBoxProps) {
-  const { lastTranslation, isProcessing } = useAppStore();
+export function TranscriptionBox({ translationState = 'idle', translationId = null }: TranscriptionBoxProps) {
+  const { lastTranslation, isProcessing, sessionId } = useAppStore();
+
+  const [dismissedTranslationId, setDismissedTranslationId] = useState<string | null>(null);
+
+  const showSpinner = translationState === 'processing' || isProcessing;
+
+  const showFeedback = Boolean(
+    lastTranslation &&
+      translationId &&
+      dismissedTranslationId !== translationId &&
+      !showSpinner &&
+      translationState !== 'pause_detected'
+  );
 
   // Get message based on translation state
   const getMessage = (): string => {
+    // If feedback is visible, keep showing the translation
+    if (showFeedback && lastTranslation) {
+      return lastTranslation.text;
+    }
+    
     switch (translationState) {
       case 'idle':
         return 'Show your hands to start...';
@@ -23,13 +43,11 @@ export function TranscriptionBox({ translationState = 'idle' }: TranscriptionBox
       case 'processing':
         return 'Processing...';
       case 'complete':
-        return lastTranslation || 'Translation complete!';
+        return lastTranslation?.text || 'Translation complete!';
       default:
         return 'Start signing to see translation...';
     }
   };
-
-  const showSpinner = translationState === 'processing' || isProcessing;
 
   return (
     <div className="w-full max-w-md px-4">
@@ -76,6 +94,29 @@ export function TranscriptionBox({ translationState = 'idle' }: TranscriptionBox
             >
               {getMessage()}
             </motion.p>
+          )}
+        </AnimatePresence>
+
+        {/* Feedback Buttons - Show after translation complete */}
+        <AnimatePresence>
+          {showFeedback && lastTranslation && translationId && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-3 border-t border-gray-700 pt-3"
+            >
+              <FeedbackButtons
+                key={translationId}
+                recognition={lastTranslation}
+                sessionId={sessionId}
+                translationId={translationId}
+                onFeedbackSubmitted={() => {
+                  const translationIdToDismiss = translationId;
+                  setTimeout(() => setDismissedTranslationId(translationIdToDismiss), 2000);
+                }}
+              />
+            </motion.div>
           )}
         </AnimatePresence>
       </motion.div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import type { SignRecognizeResult } from '@/lib/sign-recognition/types';
 
 export type AppMode = 'SIGNING' | 'LISTENING';
 
@@ -10,13 +11,16 @@ interface AppState {
   setMode: (mode: AppMode) => void;
   toggleMode: () => void;
 
+  // Session ID for feedback tracking
+  sessionId: string;
+
   // Processing state
   isProcessing: boolean;
   setProcessing: (isProcessing: boolean) => void;
 
   // Translation
-  lastTranslation: string;
-  setLastTranslation: (text: string) => void;
+  lastTranslation: SignRecognizeResult | null;
+  setLastTranslation: (translation: SignRecognizeResult | null) => void;
 
   // Gloss sequence for avatar playback
   currentGlossSequence: string[];
@@ -28,6 +32,9 @@ interface AppState {
   setShouldAutoPlay: (value: boolean) => void;
 }
 
+// Generate a session ID on store creation
+const generateSessionId = () => crypto.randomUUID();
+
 export const useAppStore = create<AppState>((set) => ({
   // Mode
   mode: 'SIGNING',
@@ -36,13 +43,16 @@ export const useAppStore = create<AppState>((set) => ({
     mode: state.mode === 'SIGNING' ? 'LISTENING' : 'SIGNING'
   })),
 
+  // Session ID for feedback tracking
+  sessionId: generateSessionId(),
+
   // Processing state
   isProcessing: false,
   setProcessing: (isProcessing) => set({ isProcessing }),
 
   // Translation
-  lastTranslation: '',
-  setLastTranslation: (text) => set({ lastTranslation: text }),
+  lastTranslation: null,
+  setLastTranslation: (translation) => set({ lastTranslation: translation }),
 
   // Gloss sequence
   currentGlossSequence: [],

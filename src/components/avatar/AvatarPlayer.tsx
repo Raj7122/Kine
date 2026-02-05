@@ -139,14 +139,14 @@ export function AvatarPlayer({
       if (avatarMode === 'flipbook') {
         // @ts-expect-error - Call flipbook's global function
         if (window.playFlipbookSequence) {
-          // @ts-expect-error
+          // @ts-expect-error - window global test helper is not typed
           window.playFlipbookSequence(glosses);
         }
       } else if (avatarMode === 'genasl') {
         // GenASL takes full text, not glosses - join them
         // @ts-expect-error - Call GenASL's global function
         if (window.playGenASL) {
-          // @ts-expect-error
+          // @ts-expect-error - window global test helper is not typed
           window.playGenASL(glosses.join(' '));
         }
       } else {
@@ -157,10 +157,10 @@ export function AvatarPlayer({
     // @ts-expect-error - Expose for testing
     window.stopAvatar = () => {
       if (avatarMode === 'flipbook') {
-        // @ts-expect-error
+        // @ts-expect-error - window global test helper is not typed
         if (window.stopFlipbook) window.stopFlipbook();
       } else if (avatarMode === 'genasl') {
-        // @ts-expect-error
+        // @ts-expect-error - window global test helper is not typed
         if (window.stopGenASL) window.stopGenASL();
       } else {
         stop();

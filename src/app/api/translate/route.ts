@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
  */
 function parseGlossResponse(response: string, originalText: string): string[] {
   // Clean up the response
-  let cleaned = response
+  const cleaned = response
     .replace(/```[^`]*```/g, '') // Remove code blocks
     .replace(/["\[\]]/g, '')     // Remove quotes and brackets
     .trim();

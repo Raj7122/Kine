@@ -1,7 +1,7 @@
 import { ASL_GLOSS_SYSTEM_PROMPT, generateTranslationPrompt, parseGlossResponse } from './prompts';
 
 // Check if Gemini is configured (support both server and client-side)
-const geminiApiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+const geminiApiKey = process.env.GEMINI_API_KEY;
 export const isGeminiConfigured = !!(
   geminiApiKey &&
   geminiApiKey !== 'your-gemini-api-key-here'
