@@ -7,7 +7,7 @@ export interface RateLimitResult {
 }
 
 const DEFAULT_WINDOW_MS = 60_000;
-const DEFAULT_MAX_REQUESTS = 30;
+const DEFAULT_MAX_REQUESTS = 15; // Conservative limit to stay under Gemini free-tier ceiling
 
 type WindowEntry = {
   timestamps: number[];

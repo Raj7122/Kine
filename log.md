@@ -228,9 +228,30 @@
 
 ---
 
+## 2026-02-05 — Bug Fix: Gemini 429 Rate Limit Handling + Retry Countdown
+
+- **Symptom**: Sign recognition stuck in processing; console logs showed repeated `[Translation] Error: {}` or rapid `Gemini API rate limit reached` errors. UI silently looped without giving the user a clear retry path.
+- **Root Causes**:
+  1. Gemini 429 errors were returned without a user-friendly explanation.
+  2. Client cooldown was overwritten in the `catch` block, negating `Retry-After` handling.
+  3. `processLandmarks` could still trigger translation every frame once silence threshold was hit.
+- **Fixes**:
+  - **API** (`/api/sign-recognize`): Added explicit 429 handling with `Retry-After` passthrough and clear user message. Other HTTP errors continue to return 502.
+  - **Rate Limiter** (`rateLimit.ts`): Reduced default sliding window from **30 → 15 req/min** to stay under Gemini free-tier limits.
+  - **Client** (`useTranslation.ts`):
+    - Added `translationRetryAfterUntil` state and respected `Retry-After` header on 429s.
+    - Prevented cooldown overwrite in `catch` when a longer retry window is already set.
+    - Added cooldown guard in `processLandmarks` to stop re-triggering while in cooldown.
+  - **UI** (`TranscriptionBox.tsx`): Display errors in red and show a countdown (“Retry available in Xs”) when rate-limited.
+  - **Wiring** (`page.tsx`): Passed retry countdown prop into `TranscriptionBox`.
+- **Tests**: `npx vitest run` (113 passing) and `npx tsc --noEmit` (clean).
+- **Files Modified**: `src/app/api/sign-recognize/route.ts`, `src/lib/sign-recognition/rateLimit.ts`, `src/hooks/useTranslation.ts`, `src/app/page.tsx`, `src/components/ui/TranscriptionBox.tsx`
+
+---
+
 ## 2026-02-05 — Test Suite Status
 
-- **Total Tests**: 113 passing (0 failing)
+- **Total Tests**: 114 passing (0 failing)
 - **Test Files** (8):
   - `src/lib/detection/confidenceFusion.test.ts`
   - `src/lib/detection/hybridDetector.test.ts`

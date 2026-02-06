@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
 import { FeedbackButtons } from '@/components/feedback';
@@ -8,13 +8,41 @@ import type { TranslationState } from '@/hooks/useTranslation';
 
 interface TranscriptionBoxProps {
   translationState?: TranslationState;
+  translationError?: string | null;
+  translationRetryAfterUntil?: number | null;
   translationId?: string | null;
 }
 
-export function TranscriptionBox({ translationState = 'idle', translationId = null }: TranscriptionBoxProps) {
+export function TranscriptionBox({
+  translationState = 'idle',
+  translationError = null,
+  translationRetryAfterUntil = null,
+  translationId = null,
+}: TranscriptionBoxProps) {
   const { lastTranslation, isProcessing, sessionId } = useAppStore();
 
   const [dismissedTranslationId, setDismissedTranslationId] = useState<string | null>(null);
+  const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!translationRetryAfterUntil) {
+      setRetryCountdown(null);
+      return;
+    }
+
+    const updateCountdown = () => {
+      const remainingMs = translationRetryAfterUntil - Date.now();
+      if (remainingMs <= 0) {
+        setRetryCountdown(null);
+        return;
+      }
+      setRetryCountdown(Math.ceil(remainingMs / 1000));
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, [translationRetryAfterUntil]);
 
   const showSpinner = translationState === 'processing' || isProcessing;
 
@@ -44,6 +72,8 @@ export function TranscriptionBox({ translationState = 'idle', translationId = nu
         return 'Processing...';
       case 'complete':
         return lastTranslation?.text || 'Translation complete!';
+      case 'error':
+        return translationError || 'Recognition failed. Try again.';
       default:
         return 'Start signing to see translation...';
     }
@@ -90,12 +120,20 @@ export function TranscriptionBox({ translationState = 'idle', translationId = nu
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="text-lg font-medium text-yellow-400"
+              className={`text-lg font-medium ${
+                translationState === 'error' ? 'text-red-400' : 'text-yellow-400'
+              }`}
             >
               {getMessage()}
             </motion.p>
           )}
         </AnimatePresence>
+
+        {translationState === 'error' && retryCountdown !== null && (
+          <p className="mt-2 text-sm text-red-300">
+            Retry available in {retryCountdown}s
+          </p>
+        )}
 
         {/* Feedback Buttons - Show after translation complete */}
         <AnimatePresence>

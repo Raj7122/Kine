@@ -19,6 +19,14 @@ describe('checkSlidingWindowRateLimit', () => {
     expect(result.remaining).toBe(1);
   });
 
+  it('uses the default maxRequests when options are omitted', () => {
+    const result = checkSlidingWindowRateLimit('default', { now: 0 });
+
+    expect(result.allowed).toBe(true);
+    expect(result.limit).toBe(15);
+    expect(result.remaining).toBe(14);
+  });
+
   it('blocks when max requests are exceeded within the window', () => {
     const options = { windowMs: 1000, maxRequests: 2 };
 

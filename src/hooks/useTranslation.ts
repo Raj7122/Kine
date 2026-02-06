@@ -20,7 +20,8 @@ export type TranslationState =
   | 'signing'
   | 'pause_detected'
   | 'processing'
-  | 'complete';
+  | 'complete'
+  | 'error';
 
 export interface TranslationResult {
   id: string;
@@ -34,6 +35,8 @@ export interface TranslationResult {
 export interface UseTranslationReturn {
   state: TranslationState;
   translation: TranslationResult | null;
+  translationError: string | null;
+  translationRetryAfterUntil: number | null;
   silenceProgress: number; // 0 to 1, how close to triggering
   processLandmarks: (result: LandmarkResult) => void;
   setVideoElement: (video: HTMLVideoElement | null) => void;
@@ -46,13 +49,21 @@ let sessionId: string | null = null;
 // Video frame capture interval (capture every N landmark frames)
 const VIDEO_CAPTURE_INTERVAL = 3; // Capture every 3rd frame (~10 FPS at 30 FPS landmark rate)
 
+// Cooldown after an error before allowing another translation attempt
+const ERROR_COOLDOWN_MS = 5_000;
+
 export function useTranslation(
   onTranslationComplete?: (translation: TranslationResult) => void
 ): UseTranslationReturn {
   const storeSessionId = useAppStore((state) => state.sessionId);
   const [state, setState] = useState<TranslationState>('idle');
   const [translation, setTranslation] = useState<TranslationResult | null>(null);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  const [translationRetryAfterUntil, setTranslationRetryAfterUntil] = useState<number | null>(null);
   const [silenceProgress, setSilenceProgress] = useState(0);
+
+  // Cooldown ref to prevent rapid re-triggering after errors
+  const lastErrorTimeRef = useRef<number>(0);
 
   const motionDetectorRef = useRef<MotionDetector>(new MotionDetector());
   const silenceStartRef = useRef<number | null>(null);
@@ -168,6 +179,11 @@ export function useTranslation(
 
       // Check if silence threshold reached
       if (silenceDuration >= SILENCE_TRIGGER_THRESHOLD) {
+        // Don't trigger during error cooldown
+        const timeSinceLastError = Date.now() - lastErrorTimeRef.current;
+        if (timeSinceLastError < ERROR_COOLDOWN_MS) {
+          return;
+        }
         console.log('[Translation] Silence threshold reached, triggering translation');
         console.log('[Translation] Final buffers - Landmarks:', landmarkBufferRef.current.length, 'Video frames:', videoFrameBufferRef.current.length);
         triggerTranslation();
@@ -188,8 +204,16 @@ export function useTranslation(
   const triggerTranslation = useCallback(async () => {
     if (isProcessingRef.current) return;
 
+    // Enforce cooldown after errors to prevent rapid re-triggering
+    const timeSinceLastError = Date.now() - lastErrorTimeRef.current;
+    if (timeSinceLastError < ERROR_COOLDOWN_MS) {
+      return;
+    }
+
     isProcessingRef.current = true;
     setState('processing');
+    setTranslationError(null);
+    setTranslationRetryAfterUntil(null);
     silenceStartRef.current = null;
     setSilenceProgress(0);
 
@@ -226,6 +250,15 @@ export function useTranslation(
 
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.success) {
+        // For rate limit errors, use a longer cooldown from Retry-After header
+        if (response.status === 429) {
+          const retryAfter = parseInt(response.headers.get('retry-after') || '30', 10);
+          const retryUntil = Date.now() + (retryAfter * 1000);
+          lastErrorTimeRef.current = retryUntil - ERROR_COOLDOWN_MS;
+          setTranslationRetryAfterUntil(retryUntil);
+        } else {
+          setTranslationRetryAfterUntil(null);
+        }
         throw new Error(data?.error || 'Sign recognition failed');
       }
 
@@ -322,8 +355,14 @@ export function useTranslation(
         onTranslationComplete(result);
       }
     } catch (error) {
-      console.error('[Translation] Error:', error);
-      setState('idle');
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error('[Translation] Error:', msg);
+      // Only set cooldown if not already set to a longer value (e.g. 429 Retry-After)
+      if (lastErrorTimeRef.current <= Date.now()) {
+        lastErrorTimeRef.current = Date.now();
+      }
+      setTranslationError(msg);
+      setState('error');
     } finally {
       isProcessingRef.current = false;
     }
@@ -333,6 +372,8 @@ export function useTranslation(
   const reset = useCallback(() => {
     setState('idle');
     setTranslation(null);
+    setTranslationError(null);
+    setTranslationRetryAfterUntil(null);
     setSilenceProgress(0);
     silenceStartRef.current = null;
     pauseSnapshotRef.current = null;
@@ -347,6 +388,8 @@ export function useTranslation(
   return {
     state,
     translation,
+    translationError,
+    translationRetryAfterUntil,
     silenceProgress,
     processLandmarks,
     setVideoElement,

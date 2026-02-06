@@ -75,6 +75,8 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   // Translation hook - handles motion detection and translation triggering
   const {
     state: translationState,
+    translationError,
+    translationRetryAfterUntil,
     silenceProgress,
     processLandmarks,
     setVideoElement: setTranslationVideoElement,
@@ -92,14 +94,21 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   // Reset after a brief delay so user can continue signing
   // The audio has already played during processing
   useEffect(() => {
-    if (translationState !== 'complete') return;
-
-    const timeout = setTimeout(() => {
-      resetTranslation();
-      console.log('[SigningView] Ready for next sign');
-    }, 1500); // Show result briefly, then reset for next sign
-
-    return () => clearTimeout(timeout);
+    if (translationState === 'complete') {
+      const timeout = setTimeout(() => {
+        resetTranslation();
+        console.log('[SigningView] Ready for next sign');
+      }, 1500);
+      return () => clearTimeout(timeout);
+    }
+    // Auto-clear error state after cooldown so user can retry
+    if (translationState === 'error') {
+      const timeout = setTimeout(() => {
+        resetTranslation();
+        console.log('[SigningView] Error cleared, ready to retry');
+      }, 5000);
+      return () => clearTimeout(timeout);
+    }
   }, [translationState, resetTranslation]);
 
   // Sync translation state with app store processing state
@@ -181,6 +190,8 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
         <div className="mb-[22vh] flex justify-center">
           <TranscriptionBox
             translationState={translationState}
+            translationError={translationError}
+            translationRetryAfterUntil={translationRetryAfterUntil}
             translationId={lastCompletedTranslationId}
           />
         </div>

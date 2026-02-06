@@ -265,6 +265,15 @@ export async function POST(request: NextRequest) {
       if (!response.ok) {
         const errorText = await response.text();
         console.error('[SignRecognize API] Gemini error:', response.status, errorText);
+
+        if (response.status === 429) {
+          const retryAfter = response.headers.get('retry-after') || '60';
+          return NextResponse.json(
+            { success: false, error: 'Gemini API rate limit reached. Please wait a moment before signing again.', sampleId },
+            { status: 429, headers: { 'Retry-After': retryAfter } }
+          );
+        }
+
         return NextResponse.json(
           { success: false, error: `Gemini API error (${response.status}). Please try again.`, sampleId },
           { status: 502 }
