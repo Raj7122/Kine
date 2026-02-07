@@ -31,10 +31,17 @@ export interface FaceLandmarkResult {
   faceBlendshapes?: Classifications[];
 }
 
+export interface GestureResult {
+  gesture: string;
+  aslMeaning: string;
+  confidence: number;
+}
+
 export interface LandmarkResult {
   hands: HandLandmarkResult | null;
   face: FaceLandmarkResult | null;
   timestamp: number;
+  gesture?: GestureResult | null;
 }
 
 // Hand landmark indices for reference

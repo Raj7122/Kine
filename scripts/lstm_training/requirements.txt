@@ -1,0 +1,27 @@
+# LSTM Training Pipeline Dependencies
+# Install: pip install -r requirements.txt
+
+# Core ML
+tensorflow>=2.15.0
+tensorflowjs>=4.15.0
+
+# Computer Vision
+mediapipe>=0.10.0
+opencv-python>=4.8.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+
+# Utilities
+tqdm>=4.65.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Video Processing
+yt-dlp>=2023.12.0  # For downloading WLASL videos
+
+# Visualization (optional, for debugging)
+matplotlib>=3.7.0
+seaborn>=0.12.0

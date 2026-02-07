@@ -105,6 +105,42 @@ describe('learnedCorrections', () => {
     expect(result.applied?.correctSign).toBe('HI');
   });
 
+  it('buildRuntimeCorrectionMap suppresses circular correction with lower count', () => {
+    const map = buildRuntimeCorrectionMap([
+      { geminiMisrecognition: 'HELLO', correctSign: 'ROCKET', occurrenceCount: 3 },
+      { geminiMisrecognition: 'ROCKET', correctSign: 'HELLO', occurrenceCount: 6 },
+    ]);
+
+    // "HELLO→ROCKET" (count 3) should be suppressed because reverse "ROCKET→HELLO" has count 6
+    expect(map.has('HELLO')).toBe(false);
+    // "ROCKET→HELLO" (count 6) should survive
+    expect(map.get('ROCKET')?.correctSign).toBe('HELLO');
+    expect(map.get('ROCKET')?.occurrenceCount).toBe(6);
+  });
+
+  it('buildRuntimeCorrectionMap removes both directions when counts are equal', () => {
+    const map = buildRuntimeCorrectionMap([
+      { geminiMisrecognition: 'A', correctSign: 'B', occurrenceCount: 5 },
+      { geminiMisrecognition: 'B', correctSign: 'A', occurrenceCount: 5 },
+    ]);
+
+    // Both contested — let Gemini decide
+    expect(map.has('A')).toBe(false);
+    expect(map.has('B')).toBe(false);
+  });
+
+  it('buildRuntimeCorrectionMap keeps non-circular corrections alongside circular ones', () => {
+    const map = buildRuntimeCorrectionMap([
+      { geminiMisrecognition: 'HELLO', correctSign: 'ROCKET', occurrenceCount: 3 },
+      { geminiMisrecognition: 'ROCKET', correctSign: 'HELLO', occurrenceCount: 6 },
+      { geminiMisrecognition: 'V', correctSign: 'SEE', occurrenceCount: 4 },
+    ]);
+
+    expect(map.has('HELLO')).toBe(false);
+    expect(map.get('ROCKET')?.correctSign).toBe('HELLO');
+    expect(map.get('V')?.correctSign).toBe('SEE');
+  });
+
   it('getRuntimeCorrectionsMap caches results within TTL', async () => {
     setQueryResponse({
       data: [

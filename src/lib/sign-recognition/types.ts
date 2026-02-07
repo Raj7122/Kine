@@ -1,6 +1,12 @@
 import type { SignLandmarkData, VideoFrame } from '@/lib/gemini/signRecognitionService';
 
-export type SignRecognizeSource = 'gemini' | 'gemini-vision' | 'mock';
+export type SignRecognizeSource =
+  | 'gemini'
+  | 'gemini-vision'
+  | 'openai'
+  | 'openai-vision'
+  | 'gesture'
+  | 'mock';
 
 export interface SignRecognizeRequestBody {
   frames: SignLandmarkData[];

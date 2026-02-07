@@ -290,6 +290,12 @@ export async function POST(request: NextRequest) {
 
       const corrected = await applyRuntimeLearnedCorrections(originalText);
 
+      if (corrected.corrected) {
+        console.log('[SignRecognize API] Runtime correction applied:', originalText, '->', corrected.text);
+      } else {
+        console.log('[SignRecognize API] No runtime correction for:', originalText);
+      }
+
       const result: SignRecognizeResult = {
         text: corrected.text,
         originalText: corrected.originalText,

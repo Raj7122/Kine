@@ -144,16 +144,37 @@ If the ENTIRE sequence is mostly STATIC (no meaningful movement) and matches ONE
 
 If you see MULTIPLE distinct letter handshapes across frames (fingerspelling a word), output the combined word by concatenating the letters with NO spaces (e.g., "C A T" → "CAT").
 
-Common single-letter handshapes:
-- **Y**: Thumb and pinky extended, others closed → Return "Y" (the letter)
+Most fingerspelled letters are STATIC handshapes (held still):
 - **A**: Fist with thumb alongside → Return "A"
 - **B**: Flat hand, fingers together, thumb tucked → Return "B"
 - **C**: Curved hand like a C → Return "C"
+- **D**: Index up, others curved to thumb → Return "D"
+- **E**: Fingers curled, thumb tucked → Return "E"
+- **F**: Index and thumb touch, others spread → Return "F"
+- **G**: Index and thumb horizontal, parallel → Return "G"
+- **H**: Index and middle extended horizontally → Return "H"
 - **I**: Pinky only extended → Return "I"
+- **K**: Index up, middle forward, thumb between → Return "K"
 - **L**: Thumb and index in L-shape → Return "L"
+- **M**: Three fingers over thumb → Return "M"
+- **N**: Two fingers over thumb → Return "N"
 - **O**: Fingers curved to meet thumb → Return "O"
+- **P**: Like K but pointing down → Return "P"
+- **Q**: Like G but pointing down → Return "Q"
+- **R**: Index and middle crossed → Return "R"
+- **S**: Fist with thumb over fingers → Return "S"
+- **T**: Thumb between index and middle → Return "T"
+- **U**: Index and middle together, up → Return "U"
 - **V**: Index and middle extended in V → Return "V"
 - **W**: Index, middle, ring extended → Return "W"
+- **X**: Index bent like a hook → Return "X"
+- **Y**: Thumb and pinky extended, others closed → Return "Y"
+
+**DYNAMIC fingerspelled letters** (require movement to identify):
+- **J**: Pinky extended, draw a J-shape downward motion → Return "J"
+- **Z**: Index finger draws a Z-shape in the air → Return "Z"
+
+When distinguishing J from I: If the pinky is extended AND there is a curved downward motion, it is "J". If static, it is "I".
 
 ## Instructions
 1. Determine if this clip is fingerspelling or a lexical sign by analyzing the FULL sequence (all frames).
@@ -272,9 +293,17 @@ export function formatLandmarksForPrompt(buffer: LandmarkBuffer): string {
 
 /**
  * Recognize sign language using Gemini with video frames (true multimodal)
+ * @param buffer - Landmark and video frame buffer
+ * @param lstmHint - Optional hint from LSTM dynamic sign detection
  */
-export async function recognizeSign(buffer: LandmarkBuffer): Promise<SignRecognitionResult> {
+export async function recognizeSign(
+  buffer: LandmarkBuffer,
+  lstmHint?: string | null
+): Promise<SignRecognitionResult> {
   console.log('[SignRecognition] Processing', buffer.frames.length, 'landmark frames,', buffer.videoFrames.length, 'video frames');
+  if (lstmHint) {
+    console.log('[SignRecognition] LSTM hint:', lstmHint);
+  }
 
   if (!isGeminiMultimodalConfigured) {
     console.log('[SignRecognition] Gemini not configured, using mock');
@@ -316,6 +345,13 @@ export async function recognizeSign(buffer: LandmarkBuffer): Promise<SignRecogni
 
     // Add landmark data
     parts.push({ text: `\n\n## Landmark Data\nHere are the precise hand and face landmark coordinates:\n\n${landmarkText}` });
+
+    // Add LSTM hint if available
+    if (lstmHint) {
+      parts.push({
+        text: `\n\n## LSTM Detection Context\n${lstmHint}\nUse this as supporting evidence but verify with the visual data.`,
+      });
+    }
 
     // Final instruction
     parts.push({ text: '\n\n## Task\nBased on the video frames and landmark data above, what is being signed? Respond with ONLY the English translation.' });

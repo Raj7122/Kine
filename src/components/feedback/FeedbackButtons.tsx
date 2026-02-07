@@ -90,7 +90,7 @@ export function FeedbackButtons({
   };
 
   const buildSubmitPayload = () => {
-    let allCorrections = [...corrections];
+    const allCorrections = [...corrections];
     const inputNormalized = normalizeCorrection(correctionInput);
     if (inputNormalized && !allCorrections.includes(inputNormalized)) {
       allCorrections.push(inputNormalized);

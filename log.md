@@ -321,3 +321,48 @@
 │    - mark_prompt_patterns_added() [planned RPC]             │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 2026-02-07 — Bug Fix: SIGNING mode translation state/type mismatch + build/lint stabilization
+
+- **Symptom**: Type/lint errors due to `TranslationState` mismatch between `useSigningModeTranslation` and UI consumers (`page.tsx`, `TranscriptionBox.tsx`). UI expected an `'error'` state plus `translationError` and `translationRetryAfterUntil`.
+- **Fix**:
+  - Updated `src/hooks/useSigningModeTranslation.ts`:
+    - Added `'error'` to `TranslationState`.
+    - Added `translationError` + `translationRetryAfterUntil` state and returned them from the hook.
+    - Extended `TranslationResult` to include `recognition: SignRecognizeResult` so consumers can rely on `translation.recognition.*`.
+    - Updated error handling to set `state: 'error'` and populate `translationError`.
+  - Added MediaPipe gesture typing support:
+    - Added `GestureResult` type and optional `gesture` field on `LandmarkResult` in `src/lib/mediapipe/types.ts`.
+    - Added `src/lib/mediapipe/gestureRecognizer.ts` and exported it from `src/lib/mediapipe/index.ts` to satisfy gesture-recognition imports.
+  - Fixed lint errors (`prefer-const`, React hook purity) in:
+    - `src/app/api/openai/recognize/route.ts`
+    - `src/components/camera/YOLOOverlay.tsx`
+    - `src/components/feedback/FeedbackButtons.tsx`
+    - `src/components/ui/TranscriptionBox.tsx`
+    - `src/hooks/useTranslation.ts`
+  - Fixed failing unit tests for LSTM temporal buffer by supporting both 63-feature (single-hand) and 126-feature (two-hand) modes based on `LSTM_FEATURE_COUNT` in `src/lib/lstm/temporalBuffer.ts`.
+
+- **Verification**:
+  - `npm install`
+  - `npm run lint -- --quiet`
+  - `npm run build`
+  - `npm run test:run`
+
+---
+
+## 2026-02-07 — Feature: Switch Signing Recognition from OpenAI to Gemini
+
+- **Goal**: Replace the OpenAI GPT-4o sign recognition pipeline with the existing Gemini 3.0 Flash `/api/sign-recognize` route, which includes prompt augmentation and runtime learned corrections.
+- **Reason**: `OPENAI_API_KEY` was not configured, causing 500 errors. Gemini is the project's canonical recognition backend (per "Gemini Sandwich" architecture) and `GEMINI_API_KEY` is already set.
+- **Deliverables**:
+  - `src/lib/sign-recognition/geminiClient.ts` — Client-side function `recognizeSignWithGemini()` that calls `POST /api/sign-recognize` with `{ frames, videoFrames, sessionId }`. Returns `SignRecognizeResult`. Handles HTTP errors, rate-limit `Retry-After`, and network failures.
+  - Updated `src/hooks/useSigningModeTranslation.ts`:
+    - Replaced `recognizeSignWithOpenAI` import/call with `recognizeSignWithGemini`.
+    - Removed `createLandmarkBuffer` import (no longer needed — Gemini client trims frames directly).
+    - Kept `captureVideoFrame` import from `@/lib/openai` (DOM utility for video frame capture).
+  - `src/lib/sign-recognition/geminiClient.test.ts` — 7 unit tests covering: correct payload, frame trimming, HTTP 429/503 errors, `success: false`, default field handling, network failure.
+- **Tests**: 14 files, 267 tests passing (0 failing).
+- **Files Created**: `src/lib/sign-recognition/geminiClient.ts`, `src/lib/sign-recognition/geminiClient.test.ts`
+- **Files Modified**: `src/hooks/useSigningModeTranslation.ts`

@@ -29,7 +29,7 @@ export interface TranslationResult {
   recognition: SignRecognizeResult;
   gloss: string[];
   category: string;
-  source: 'gemini' | 'gemini-vision' | 'mock';
+  source: SignRecognizeResult['source'];
 }
 
 export interface UseTranslationReturn {
@@ -219,7 +219,6 @@ export function useTranslation(
 
     try {
       let result: TranslationResult;
-      let recognition: SignRecognizeResult;
 
       // Step 1: Sign Recognition - Gemini as "The Eyes"
       // Convert landmarks + video frames to English text
@@ -262,7 +261,7 @@ export function useTranslation(
         throw new Error(data?.error || 'Sign recognition failed');
       }
 
-      recognition = {
+      const recognition: SignRecognizeResult = {
         text: data.text,
         originalText: data.originalText,
         corrected: data.corrected,

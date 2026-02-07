@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
 import { FeedbackButtons } from '@/components/feedback';
-import type { TranslationState } from '@/hooks/useTranslation';
+import type { TranslationState } from '@/hooks/useSigningModeTranslation';
 
 interface TranscriptionBoxProps {
   translationState?: TranslationState;
@@ -26,8 +26,8 @@ export function TranscriptionBox({
 
   useEffect(() => {
     if (!translationRetryAfterUntil) {
-      setRetryCountdown(null);
-      return;
+      const timeout = setTimeout(() => setRetryCountdown(null), 0);
+      return () => clearTimeout(timeout);
     }
 
     const updateCountdown = () => {
@@ -39,9 +39,13 @@ export function TranscriptionBox({
       setRetryCountdown(Math.ceil(remainingMs / 1000));
     };
 
-    updateCountdown();
+    const timeout = setTimeout(updateCountdown, 0);
     const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+    };
   }, [translationRetryAfterUntil]);
 
   const showSpinner = translationState === 'processing' || isProcessing;

@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
           text,
           model_id: modelId || DEFAULT_MODEL_ID,
           voice_settings: voiceSettings || {
-            stability: 0.5,
+            stability: 0.85,  // Higher stability for consistent tone
             similarity_boost: 0.75,
             style: 0,
             use_speaker_boost: true,

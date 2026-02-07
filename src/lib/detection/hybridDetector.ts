@@ -1,4 +1,4 @@
-// Hybrid detection system orchestrating Roboflow YOLO + MediaPipe
+// Hybrid detection system orchestrating Roboflow YOLO + MediaPipe + LSTM
 
 import {
   detectSign,
@@ -12,44 +12,65 @@ import {
   HybridDetectorState,
   DetectionHistory,
   FusionOutput,
+  DetectionMode,
 } from './types';
 import {
   fuseDetections,
+  fuseWithLSTM,
   getBestDetection,
   createDetectionHistory,
   addToHistory,
 } from './confidenceFusion';
-import { ROBOFLOW_TEMPORAL_WINDOW } from '@/config/constants';
+import type { LSTMPrediction } from '../lstm/types';
+import {
+  ROBOFLOW_TEMPORAL_WINDOW,
+  LSTM_CONFIDENCE_THRESHOLD,
+} from '@/config/constants';
 
 // Module-level state
 let state: HybridDetectorState = {
   isEnabled: false,
   lastRoboflowResult: null,
+  lastLSTMPrediction: null,
   lastFusionOutput: null,
   history: createDetectionHistory(ROBOFLOW_TEMPORAL_WINDOW * 2),
   isProcessing: false,
+  detectionMode: 'HYBRID',
+  isLSTMEnabled: false,
 };
 
 /**
  * Initialize the hybrid detector
  * @param enableRoboflow Whether to enable Roboflow API calls
+ * @param enableLSTM Whether to enable LSTM dynamic gesture detection
+ * @param mode Detection mode: STATIC (YOLO only), DYNAMIC (LSTM only), HYBRID (both)
  */
-export function initHybridDetector(enableRoboflow: boolean = true): void {
+export function initHybridDetector(
+  enableRoboflow: boolean = true,
+  enableLSTM: boolean = true,
+  mode: DetectionMode = 'HYBRID'
+): void {
   const roboflowAvailable = isRoboflowConfigured();
 
   state = {
     isEnabled: enableRoboflow && roboflowAvailable,
     lastRoboflowResult: null,
+    lastLSTMPrediction: null,
     lastFusionOutput: null,
     history: createDetectionHistory(ROBOFLOW_TEMPORAL_WINDOW * 2),
     isProcessing: false,
+    detectionMode: mode,
+    isLSTMEnabled: enableLSTM,
   };
 
   if (enableRoboflow && !roboflowAvailable) {
     console.warn('Roboflow requested but not configured. Running in MediaPipe-only mode.');
   }
 
-  console.log(`Hybrid detector initialized. Roboflow: ${state.isEnabled ? 'enabled' : 'disabled'}`);
+  console.log(
+    `Hybrid detector initialized. Roboflow: ${state.isEnabled ? 'enabled' : 'disabled'}, ` +
+    `LSTM: ${state.isLSTMEnabled ? 'enabled' : 'disabled'}, Mode: ${mode}`
+  );
 }
 
 /**
@@ -57,36 +78,103 @@ export function initHybridDetector(enableRoboflow: boolean = true): void {
  * @param video HTMLVideoElement to process
  * @param motionMagnitude Current motion magnitude (0-1)
  * @param mediapipeActive Whether MediaPipe is currently detecting
+ * @param lstmPrediction Optional LSTM prediction from parallel processing
  */
 export async function processFrame(
   video: HTMLVideoElement,
   motionMagnitude: number,
-  mediapipeActive: boolean
+  mediapipeActive: boolean,
+  lstmPrediction?: LSTMPrediction | null
 ): Promise<HybridDetectionResult> {
   const timestamp = Date.now();
 
-  // Default result with no Roboflow detection
+  // Update LSTM prediction if provided
+  if (lstmPrediction !== undefined) {
+    state.lastLSTMPrediction = lstmPrediction;
+  }
+
+  // Default result with no detection
   let result: HybridDetectionResult = {
     roboflowDetections: [],
+    lstmPrediction: state.lastLSTMPrediction,
     fusionOutput: { action: 'rely_gemini', hint: null },
     mediapipeActive,
     timestamp,
+    detectionMode: state.detectionMode,
   };
 
-  // Skip Roboflow if disabled or already processing
-  if (!state.isEnabled || state.isProcessing) {
-    return result;
-  }
+  // Skip Roboflow if disabled or already processing, or in DYNAMIC-only mode
+  const shouldRunRoboflow =
+    state.isEnabled &&
+    !state.isProcessing &&
+    state.detectionMode !== 'DYNAMIC';
 
-  // Check if we should call the API based on rate limiting and motion
-  if (!shouldCallAPI(motionMagnitude)) {
+  if (!shouldRunRoboflow) {
+    // Still fuse with LSTM if available
+    if (state.isLSTMEnabled && state.lastLSTMPrediction) {
+      const fusionOutput = fuseWithLSTM(
+        null,
+        state.lastLSTMPrediction,
+        state.history,
+        motionMagnitude
+      );
+      state.lastFusionOutput = fusionOutput;
+
+      return {
+        roboflowDetections: state.lastRoboflowResult || [],
+        lstmPrediction: state.lastLSTMPrediction,
+        fusionOutput,
+        mediapipeActive,
+        timestamp,
+        detectionMode: state.detectionMode,
+      };
+    }
+
     // Return last result if we have one
     if (state.lastRoboflowResult && state.lastFusionOutput) {
       return {
         roboflowDetections: state.lastRoboflowResult,
+        lstmPrediction: state.lastLSTMPrediction,
         fusionOutput: state.lastFusionOutput,
         mediapipeActive,
         timestamp,
+        detectionMode: state.detectionMode,
+      };
+    }
+    return result;
+  }
+
+  // Check if we should call the Roboflow API based on rate limiting and motion
+  if (!shouldCallAPI(motionMagnitude)) {
+    // Still fuse with LSTM if available
+    if (state.isLSTMEnabled && state.lastLSTMPrediction) {
+      const fusionOutput = fuseWithLSTM(
+        state.lastRoboflowResult ? getBestDetection(state.lastRoboflowResult) : null,
+        state.lastLSTMPrediction,
+        state.history,
+        motionMagnitude
+      );
+      state.lastFusionOutput = fusionOutput;
+
+      return {
+        roboflowDetections: state.lastRoboflowResult || [],
+        lstmPrediction: state.lastLSTMPrediction,
+        fusionOutput,
+        mediapipeActive,
+        timestamp,
+        detectionMode: state.detectionMode,
+      };
+    }
+
+    // Return last result if we have one
+    if (state.lastRoboflowResult && state.lastFusionOutput) {
+      return {
+        roboflowDetections: state.lastRoboflowResult,
+        lstmPrediction: state.lastLSTMPrediction,
+        fusionOutput: state.lastFusionOutput,
+        mediapipeActive,
+        timestamp,
+        detectionMode: state.detectionMode,
       };
     }
     return result;
@@ -108,15 +196,29 @@ export async function processFrame(
       state.history = addToHistory(state.history, bestDetection);
     }
 
-    // Fuse detections with history for final output
-    const fusionOutput = fuseDetections(bestDetection, state.history);
+    // Fuse detections with LSTM and history
+    let fusionOutput: FusionOutput;
+
+    if (state.isLSTMEnabled) {
+      fusionOutput = fuseWithLSTM(
+        bestDetection,
+        state.lastLSTMPrediction,
+        state.history,
+        motionMagnitude
+      );
+    } else {
+      fusionOutput = fuseDetections(bestDetection, state.history);
+    }
+
     state.lastFusionOutput = fusionOutput;
 
     result = {
       roboflowDetections: detections,
+      lstmPrediction: state.lastLSTMPrediction,
       fusionOutput,
       mediapipeActive,
       timestamp,
+      detectionMode: state.detectionMode,
     };
   } catch (error) {
     console.error('Hybrid detection error:', error);
@@ -152,7 +254,41 @@ export function setRoboflowEnabled(enabled: boolean): void {
 export function clearHistory(): void {
   state.history = createDetectionHistory(ROBOFLOW_TEMPORAL_WINDOW * 2);
   state.lastRoboflowResult = null;
+  state.lastLSTMPrediction = null;
   state.lastFusionOutput = null;
+}
+
+/**
+ * Enable or disable LSTM detection
+ */
+export function setLSTMEnabled(enabled: boolean): void {
+  state.isLSTMEnabled = enabled;
+  if (!enabled) {
+    state.lastLSTMPrediction = null;
+  }
+  console.log(`LSTM detection ${enabled ? 'enabled' : 'disabled'}`);
+}
+
+/**
+ * Set detection mode
+ */
+export function setDetectionMode(mode: DetectionMode): void {
+  state.detectionMode = mode;
+  console.log(`Detection mode set to: ${mode}`);
+}
+
+/**
+ * Get last LSTM prediction
+ */
+export function getLastLSTMPrediction(): LSTMPrediction | null {
+  return state.lastLSTMPrediction;
+}
+
+/**
+ * Update LSTM prediction externally (from useLSTMDetection hook)
+ */
+export function updateLSTMPrediction(prediction: LSTMPrediction | null): void {
+  state.lastLSTMPrediction = prediction;
 }
 
 /**
@@ -181,10 +317,16 @@ if (typeof window !== 'undefined') {
   const windowWithDebug = window as unknown as {
     getHybridDetectionState: typeof getHybridDetectorState;
     setRoboflowEnabled: typeof setRoboflowEnabled;
+    setLSTMEnabled: typeof setLSTMEnabled;
+    setDetectionMode: typeof setDetectionMode;
     clearDetectionHistory: typeof clearHistory;
+    getLastLSTMPrediction: typeof getLastLSTMPrediction;
   };
 
   windowWithDebug.getHybridDetectionState = getHybridDetectorState;
   windowWithDebug.setRoboflowEnabled = setRoboflowEnabled;
+  windowWithDebug.setLSTMEnabled = setLSTMEnabled;
+  windowWithDebug.setDetectionMode = setDetectionMode;
   windowWithDebug.clearDetectionHistory = clearHistory;
+  windowWithDebug.getLastLSTMPrediction = getLastLSTMPrediction;
 }

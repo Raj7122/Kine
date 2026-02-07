@@ -14,7 +14,7 @@ export interface RuntimeCorrectionResult {
 }
 
 const RUNTIME_MIN_OCCURRENCES = 3;
-const CACHE_TTL_MS = 60_000;
+const CACHE_TTL_MS = 10_000;
 
 let cachedAt = 0;
 let cachedMap: Map<string, LearnedCorrection> | null = null;
@@ -70,6 +70,37 @@ export function buildRuntimeCorrectionMap(rows: LearnedCorrection[]): Map<string
     }
   }
 
+  // Remove circular corrections: if A→B and B→A both exist, keep only
+  // the one with the higher occurrence count (more recent user consensus).
+  // If counts are equal, remove both (contested — let Gemini decide).
+  const toRemove: string[] = [];
+  for (const [key, correction] of map.entries()) {
+    const reverseKey = normalizeLearnedCorrectionKey(correction.correctSign);
+    const reverse = map.get(reverseKey);
+    if (!reverse) continue;
+
+    const reverseTargetKey = normalizeLearnedCorrectionKey(reverse.correctSign);
+    if (reverseTargetKey !== key) continue;
+
+    // Circular: A→B and B→A both exist
+    if (correction.occurrenceCount < reverse.occurrenceCount) {
+      toRemove.push(key);
+    } else if (correction.occurrenceCount === reverse.occurrenceCount) {
+      toRemove.push(key);
+      toRemove.push(reverseKey);
+    }
+    // If correction.occurrenceCount > reverse.occurrenceCount, keep this one
+    // (the reverse will be removed when we encounter it in the loop)
+  }
+
+  for (const key of toRemove) {
+    const removed = map.get(key);
+    if (removed) {
+      console.log(`[SignRecognize] Suppressed circular correction: "${key}" -> "${removed.correctSign}" (count: ${removed.occurrenceCount})`);
+      map.delete(key);
+    }
+  }
+
   return map;
 }
 
@@ -93,6 +124,13 @@ async function fetchRuntimeCorrectionsMap(now: number): Promise<Map<string, Lear
     correctSign: r.correct_sign,
     occurrenceCount: r.occurrence_count,
   }));
+
+  console.log(`[SignRecognize] Fetched ${rows.length} learned corrections from DB (threshold: ${RUNTIME_MIN_OCCURRENCES})`);
+  if (rows.length > 0) {
+    for (const r of rows.slice(0, 5)) {
+      console.log(`[SignRecognize]   "${r.geminiMisrecognition}" -> "${r.correctSign}" (count: ${r.occurrenceCount})`);
+    }
+  }
 
   cachedAt = now;
   cachedMap = buildRuntimeCorrectionMap(rows);

@@ -5,3 +5,4 @@ export * from './handTracker';
 export * from './faceTracker';
 export * from './drawingUtils';
 export * from './motionDetector';
+export * from './gestureRecognizer';
