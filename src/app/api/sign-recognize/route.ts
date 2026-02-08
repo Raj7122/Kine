@@ -25,6 +25,18 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_VISION_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
+
+// Prefer OpenAI if configured, fall back to Gemini
+type AIProvider = 'openai' | 'gemini' | 'none';
+function getProvider(): AIProvider {
+  if (OPENAI_API_KEY && OPENAI_API_KEY !== 'your-openai-api-key-here') return 'openai';
+  if (GEMINI_API_KEY && GEMINI_API_KEY !== 'your-gemini-api-key-here') return 'gemini';
+  return 'none';
+}
+
 const SIGN_RECOGNIZE_TIMEOUT_MS = 9_000;
 const SIGN_RECOGNIZE_PROMPT_VERSION = 1;
 const SIGN_RECOGNIZE_SAMPLE_BUCKET = 'sign-recognition-samples';
@@ -165,7 +177,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { frames, videoFrames, sessionId } = validated.value;
+    const { frames, videoFrames, sessionId, lstmHint } = validated.value;
 
     const ip = getClientIp(request);
     const rateKey = sessionId ? `session:${sessionId}` : ip ? `ip:${ip}` : 'unknown';
@@ -191,13 +203,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, ...getMockResult(), sampleId });
     }
 
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === 'your-gemini-api-key-here') {
-      console.error('[SignRecognize API] GEMINI_API_KEY is not configured');
+    const provider = getProvider();
+    if (provider === 'none') {
+      console.error('[SignRecognize API] No AI API key configured');
       return NextResponse.json(
-        { success: false, error: 'Gemini API key is not configured. Set GEMINI_API_KEY in your environment.' },
+        { success: false, error: 'No AI API key configured. Set OPENAI_API_KEY or GEMINI_API_KEY in your environment.' },
         { status: 503 }
       );
     }
+
+    console.log(`[SignRecognize API] Using provider: ${provider}`);
 
     const buffer: LandmarkBuffer = {
       frames,
@@ -212,80 +227,144 @@ export async function POST(request: NextRequest) {
       SIGN_RECOGNIZE_PROMPT_VERSION
     );
 
-    const parts: Array<{ text: string } | { inline_data: { mime_type: string; data: string } }> = [];
-    parts.push({ text: prompt });
-
-    if (videoFrames.length > 0) {
-      const frameCount = Math.min(videoFrames.length, SIGN_RECOGNITION_FRAME_COUNT);
-      const step = Math.max(1, Math.floor(videoFrames.length / frameCount));
-
-      parts.push({ text: '\n\n## Video Frames\nHere are video frames showing the signing:' });
-
-      for (let i = 0; i < videoFrames.length; i += step) {
-        const inlineCount = parts.filter((p) => 'inline_data' in p).length;
-        if (inlineCount >= frameCount) break;
-
-        const frame = videoFrames[i];
-        const base64Data = frame.dataUrl.replace(/^data:image\/\w+;base64,/, '');
-
-        parts.push({
-          inline_data: {
-            mime_type: 'image/jpeg',
-            data: base64Data,
-          },
-        });
-      }
+    // Build the text portions shared by both providers
+    let landmarkSection = `\n\n## Landmark Data\nHere are the precise hand and face landmark coordinates:\n\n${landmarkText}`;
+    if (lstmHint) {
+      landmarkSection += `\n\n## Detection Context\n${lstmHint}\nUse this as supporting evidence but verify with the visual data.`;
     }
+    const taskSection = '\n\n## Task\nBased on the video frames and landmark data above, what is being signed? Respond with ONLY the English translation.';
 
-    parts.push({
-      text: `\n\n## Landmark Data\nHere are the precise hand and face landmark coordinates:\n\n${landmarkText}`,
-    });
-
-    parts.push({
-      text: '\n\n## Task\nBased on the video frames and landmark data above, what is being signed? Respond with ONLY the English translation.',
-    });
+    // Sample video frames
+    const frameCount = Math.min(videoFrames.length, SIGN_RECOGNITION_FRAME_COUNT);
+    const step = Math.max(1, Math.floor(videoFrames.length / frameCount));
+    const sampledFrames: typeof videoFrames = [];
+    for (let i = 0; i < videoFrames.length; i += step) {
+      if (sampledFrames.length >= frameCount) break;
+      sampledFrames.push(videoFrames[i]);
+    }
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SIGN_RECOGNIZE_TIMEOUT_MS);
 
     try {
-      const response = await fetch(`${GEMINI_VISION_URL}?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts }],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 150,
+      let responseText = '';
+
+      if (provider === 'openai') {
+        // === OpenAI Chat Completions API (GPT-4o / GPT-4o-mini) ===
+        const contentParts: Array<{ type: string; text?: string; image_url?: { url: string; detail?: string } }> = [];
+
+        contentParts.push({ type: 'text', text: prompt });
+
+        if (sampledFrames.length > 0) {
+          contentParts.push({ type: 'text', text: '\n\n## Video Frames\nHere are video frames showing the signing:' });
+          for (const frame of sampledFrames) {
+            contentParts.push({
+              type: 'image_url',
+              image_url: {
+                url: frame.dataUrl, // OpenAI accepts data URLs directly
+                detail: 'auto', // Let OpenAI choose resolution — ASL needs finger detail
+              },
+            });
+          }
+        }
+
+        contentParts.push({ type: 'text', text: landmarkSection });
+        contentParts.push({ type: 'text', text: taskSection });
+
+        const response = await fetch(OPENAI_CHAT_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
           },
-        }),
-        signal: controller.signal,
-      });
+          body: JSON.stringify({
+            model: OPENAI_MODEL,
+            messages: [{ role: 'user', content: contentParts }],
+            temperature: 0.2,
+            max_tokens: 150,
+          }),
+          signal: controller.signal,
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[SignRecognize API] Gemini error:', response.status, errorText);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[SignRecognize API] OpenAI error:', response.status, errorText);
 
-        if (response.status === 429) {
-          const retryAfter = response.headers.get('retry-after') || '60';
+          if (response.status === 429) {
+            const retryAfter = response.headers.get('retry-after') || '60';
+            return NextResponse.json(
+              { success: false, error: 'OpenAI rate limit reached. Please wait a moment.', sampleId },
+              { status: 429, headers: { 'Retry-After': retryAfter } }
+            );
+          }
+
           return NextResponse.json(
-            { success: false, error: 'Gemini API rate limit reached. Please wait a moment before signing again.', sampleId },
-            { status: 429, headers: { 'Retry-After': retryAfter } }
+            { success: false, error: `OpenAI API error (${response.status}). Please try again.`, sampleId },
+            { status: 502 }
           );
         }
 
-        return NextResponse.json(
-          { success: false, error: `Gemini API error (${response.status}). Please try again.`, sampleId },
-          { status: 502 }
-        );
-      }
+        const data = await response.json();
+        responseText = data.choices?.[0]?.message?.content || '';
+      } else {
+        // === Gemini API ===
+        const parts: Array<{ text: string } | { inline_data: { mime_type: string; data: string } }> = [];
+        parts.push({ text: prompt });
 
-      const data = await response.json();
-      const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (sampledFrames.length > 0) {
+          parts.push({ text: '\n\n## Video Frames\nHere are video frames showing the signing:' });
+          for (const frame of sampledFrames) {
+            const base64Data = frame.dataUrl.replace(/^data:image\/\w+;base64,/, '');
+            parts.push({
+              inline_data: {
+                mime_type: 'image/jpeg',
+                data: base64Data,
+              },
+            });
+          }
+        }
+
+        parts.push({ text: landmarkSection });
+        parts.push({ text: taskSection });
+
+        const response = await fetch(`${GEMINI_VISION_URL}?key=${GEMINI_API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts }],
+            generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 150,
+            },
+          }),
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('[SignRecognize API] Gemini error:', response.status, errorText);
+
+          if (response.status === 429) {
+            const retryAfter = response.headers.get('retry-after') || '60';
+            return NextResponse.json(
+              { success: false, error: 'Gemini rate limit reached. Please wait a moment.', sampleId },
+              { status: 429, headers: { 'Retry-After': retryAfter } }
+            );
+          }
+
+          return NextResponse.json(
+            { success: false, error: `Gemini API error (${response.status}). Please try again.`, sampleId },
+            { status: 502 }
+          );
+        }
+
+        const data = await response.json();
+        responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      }
 
       const originalText = cleanGeminiResponseText(responseText) || 'Hello';
 
-      const baseSource = videoFrames.length > 0 ? 'gemini-vision' : 'gemini';
+      const baseSource = (videoFrames.length > 0 ? `${provider}-vision` : provider) as SignRecognizeResult['source'];
       const baseConfidence = videoFrames.length > 0 ? 0.9 : 0.75;
 
       const corrected = await applyRuntimeLearnedCorrections(originalText);
@@ -308,7 +387,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true, ...result });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        console.warn('[SignRecognize API] Gemini request timed out');
+        console.warn('[SignRecognize API] Request timed out');
         return NextResponse.json(
           { success: false, error: 'Sign recognition timed out. Please try a clearer sign.', sampleId },
           { status: 504 }

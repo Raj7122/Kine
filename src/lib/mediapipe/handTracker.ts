@@ -4,7 +4,7 @@ import {
   HandLandmarkerResult,
 } from '@mediapipe/tasks-vision';
 import type { HandLandmarkResult } from './types';
-import { MEDIAPIPE_LANDMARK_CONFIDENCE } from '@/config/constants';
+import { MEDIAPIPE_DETECTION_CONFIDENCE, MEDIAPIPE_TRACKING_CONFIDENCE } from '@/config/constants';
 
 let handLandmarker: HandLandmarker | null = null;
 let isInitializing = false;
@@ -31,18 +31,38 @@ export async function initializeHandTracker(): Promise<HandLandmarker> {
   try {
     const vision = await FilesetResolver.forVisionTasks(VISION_WASM_PATH);
 
-    handLandmarker = await HandLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath:
-          'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-        delegate: 'CPU',
-      },
-      runningMode: 'VIDEO',
-      numHands: 2,
-      minHandDetectionConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
-      minHandPresenceConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
-      minTrackingConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
-    });
+    // Try GPU delegate first for faster inference, fall back to CPU
+    let delegate: 'GPU' | 'CPU' = 'GPU';
+    try {
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+          delegate: 'GPU',
+        },
+        runningMode: 'VIDEO',
+        numHands: 2,
+        minHandDetectionConfidence: MEDIAPIPE_DETECTION_CONFIDENCE,
+        minHandPresenceConfidence: MEDIAPIPE_DETECTION_CONFIDENCE,
+        minTrackingConfidence: MEDIAPIPE_TRACKING_CONFIDENCE,
+      });
+      console.log('[HandTracker] Using GPU delegate');
+    } catch {
+      delegate = 'CPU';
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+          delegate: 'CPU',
+        },
+        runningMode: 'VIDEO',
+        numHands: 2,
+        minHandDetectionConfidence: MEDIAPIPE_DETECTION_CONFIDENCE,
+        minHandPresenceConfidence: MEDIAPIPE_DETECTION_CONFIDENCE,
+        minTrackingConfidence: MEDIAPIPE_TRACKING_CONFIDENCE,
+      });
+      console.log('[HandTracker] GPU not available, using CPU delegate');
+    }
 
     return handLandmarker;
   } finally {

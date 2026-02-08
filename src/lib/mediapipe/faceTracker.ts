@@ -4,7 +4,7 @@ import {
   FaceLandmarkerResult,
 } from '@mediapipe/tasks-vision';
 import type { FaceLandmarkResult } from './types';
-import { MEDIAPIPE_LANDMARK_CONFIDENCE } from '@/config/constants';
+import { MEDIAPIPE_DETECTION_CONFIDENCE, MEDIAPIPE_TRACKING_CONFIDENCE } from '@/config/constants';
 
 let faceLandmarker: FaceLandmarker | null = null;
 let isInitializing = false;
@@ -31,19 +31,37 @@ export async function initializeFaceTracker(): Promise<FaceLandmarker> {
   try {
     const vision = await FilesetResolver.forVisionTasks(VISION_WASM_PATH);
 
-    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath:
-          'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-        delegate: 'CPU',
-      },
-      runningMode: 'VIDEO',
+    const faceOptions = {
+      runningMode: 'VIDEO' as const,
       numFaces: 1,
-      minFaceDetectionConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
-      minFacePresenceConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
-      minTrackingConfidence: MEDIAPIPE_LANDMARK_CONFIDENCE,
+      minFaceDetectionConfidence: MEDIAPIPE_DETECTION_CONFIDENCE,
+      minFacePresenceConfidence: MEDIAPIPE_DETECTION_CONFIDENCE,
+      minTrackingConfidence: MEDIAPIPE_TRACKING_CONFIDENCE,
       outputFaceBlendshapes: true,
-    });
+    };
+
+    // Try GPU delegate first for faster inference, fall back to CPU
+    try {
+      faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          delegate: 'GPU',
+        },
+        ...faceOptions,
+      });
+      console.log('[FaceTracker] Using GPU delegate');
+    } catch {
+      faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          delegate: 'CPU',
+        },
+        ...faceOptions,
+      });
+      console.log('[FaceTracker] GPU not available, using CPU delegate');
+    }
 
     return faceLandmarker;
   } finally {

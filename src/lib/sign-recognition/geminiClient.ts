@@ -27,6 +27,7 @@ export async function recognizeSignWithGemini(
 ): Promise<SignRecognizeResult> {
   const {
     sessionId,
+    lstmHint,
     maxLandmarkFrames = 60,
     maxVideoFrames = 20,
   } = options;
@@ -36,7 +37,7 @@ export async function recognizeSignWithGemini(
 
   console.log(
     '[GeminiClient] Sending to /api/sign-recognize:',
-    { landmarkFrames: trimmedFrames.length, videoFrames: trimmedVideo.length }
+    { landmarkFrames: trimmedFrames.length, videoFrames: trimmedVideo.length, hasHint: !!lstmHint }
   );
 
   const response = await fetch('/api/sign-recognize', {
@@ -46,6 +47,7 @@ export async function recognizeSignWithGemini(
       frames: trimmedFrames,
       videoFrames: trimmedVideo,
       sessionId,
+      lstmHint: lstmHint || null,
     }),
   });
 

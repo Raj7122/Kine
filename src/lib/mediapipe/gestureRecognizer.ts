@@ -6,6 +6,15 @@ import {
   type GestureRecognizerResult,
 } from '@mediapipe/tasks-vision';
 import type { GestureResult } from './types';
+import { MEDIAPIPE_DETECTION_CONFIDENCE, MEDIAPIPE_TRACKING_CONFIDENCE } from '@/config/constants';
+
+export type { GestureResult };
+
+export interface GestureDetectionResult {
+  gestures: GestureResult[];
+  timestamp: number;
+  rawResult: GestureRecognizerResult | null;
+}
 
 let gestureRecognizer: GestureRecognizer | null = null;
 let isInitializing = false;
@@ -31,15 +40,36 @@ export async function initializeGestureRecognizer(): Promise<GestureRecognizer> 
   try {
     const vision = await FilesetResolver.forVisionTasks(VISION_WASM_PATH);
 
-    gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath:
-          'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task',
-        delegate: 'CPU',
-      },
-      runningMode: 'VIDEO',
+    const gestureOptions = {
+      runningMode: 'VIDEO' as const,
       numHands: 2,
-    });
+      minHandDetectionConfidence: MEDIAPIPE_DETECTION_CONFIDENCE,
+      minHandPresenceConfidence: MEDIAPIPE_DETECTION_CONFIDENCE,
+      minTrackingConfidence: MEDIAPIPE_TRACKING_CONFIDENCE,
+    };
+
+    // Try GPU delegate first for faster inference, fall back to CPU
+    try {
+      gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task',
+          delegate: 'GPU',
+        },
+        ...gestureOptions,
+      });
+      console.log('[GestureRecognizer] Using GPU delegate');
+    } catch {
+      gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task',
+          delegate: 'CPU',
+        },
+        ...gestureOptions,
+      });
+      console.log('[GestureRecognizer] GPU not available, using CPU delegate');
+    }
 
     return gestureRecognizer;
   } finally {
@@ -87,12 +117,20 @@ export function getPrimaryGesture(result: GestureRecognizerResult | GestureResul
 
   const name = first.categoryName || 'None';
   const confidence = typeof first.score === 'number' ? first.score : 0;
+  const handedness = res.handedness?.[0]?.[0]?.categoryName || 'Unknown';
+  const landmarks = res.landmarks?.[0]?.map(lm => ({ x: lm.x, y: lm.y, z: lm.z })) || [];
 
   return {
     gesture: name,
     aslMeaning: normalizeGestureToMeaning(name),
     confidence,
+    handedness,
+    landmarks,
   };
+}
+
+export function isGestureRecognizerReady(): boolean {
+  return gestureRecognizer !== null;
 }
 
 export function closeGestureRecognizer(): void {

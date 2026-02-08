@@ -13,7 +13,10 @@ export interface PromptAugmentationResult {
   patternsUsed: PromptCorrectionPattern[];
 }
 
-const MIN_OCCURRENCES = 5;
+// Raised from 5 to 999 to effectively disable stale corrections.
+// The learned_corrections table has poisoned data from mock/rate-limited sessions.
+// Clear the table in Supabase dashboard, then set this back to 5.
+const MIN_OCCURRENCES = 999;
 const MAX_PATTERNS = 10;
 const MAX_CORRECTIONS_PER_MISRECOGNITION = 4;
 const CACHE_TTL_MS = 60_000;

@@ -17,6 +17,8 @@ export const LANDMARK_SMOOTHING_FACTOR = 0.85; // Exponential smoothing for flui
 
 // MediaPipe confidence thresholds
 export const MEDIAPIPE_LANDMARK_CONFIDENCE = 0.65; // Balanced confidence for better detection rate
+export const MEDIAPIPE_DETECTION_CONFIDENCE = 0.5; // Lower threshold to catch hands more reliably
+export const MEDIAPIPE_TRACKING_CONFIDENCE = 0.6; // Moderate tracking to maintain lock once found
 
 // Motion detection
 export const MIN_MOTION_THRESHOLD = 0.023; // ~15px / 640px normalized - captures subtle movements

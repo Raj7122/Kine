@@ -12,6 +12,7 @@ export interface SignRecognizeRequestBody {
   frames: SignLandmarkData[];
   videoFrames: VideoFrame[];
   sessionId?: string;
+  lstmHint?: string | null;
 }
 
 export interface SignRecognizeResult {

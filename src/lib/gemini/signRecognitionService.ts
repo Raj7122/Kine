@@ -66,7 +66,7 @@ export interface LandmarkBuffer {
 export interface SignRecognitionResult {
   text: string;
   confidence: number;
-  source: 'gemini' | 'gemini-vision' | 'mock';
+  source: 'gemini' | 'gemini-vision' | 'openai' | 'openai-vision' | 'mock';
 }
 
 /**
@@ -119,6 +119,25 @@ Common ASL handshapes to recognize:
 - **WHY**: Touch forehead, pull down to Y-hand
 - **HOW**: Backs of hands together, roll out
 - **FINISH/DONE**: 5-hands flip outward
+- **NICE/CLEAN**: Dominant flat hand slides across non-dominant flat palm
+- **MEET**: Both index fingers (1-handshape) come together, representing two people meeting
+- **NICE-TO-MEET-YOU**: Combination of NICE + MEET + point-to-you (three distinct movements)
+- **MY-NAME**: Point to self + H-hands tap together (MY + NAME)
+- **HOW-ARE-YOU**: Thumbs-up hands roll outward + point to person
+- **EAT/FOOD**: Fingertips tap mouth
+- **DRINK**: C-hand tilts to mouth
+- **WATER**: W-hand taps chin
+- **BATHROOM**: T-hand shakes
+- **AGAIN/REPEAT**: Bent hand flips into open palm
+
+## Common Phrases (Multi-Sign Sequences)
+If you see multiple distinct movements in sequence, these may be multi-sign phrases:
+- **NICE + MEET + YOU** → "Nice to meet you"
+- **HOW + YOU** → "How are you?"
+- **THANK + YOU** → "Thank you"
+- **MY + NAME + [fingerspelling]** → "My name is [name]"
+- **PLEASE + HELP** → "Please help me"
+- **I + LOVE + YOU** → "I love you" (as separate signs, not the ILY handshape)
 
 ## Non-Manual Markers (Face/Body)
 Pay attention to:
@@ -176,6 +195,12 @@ Most fingerspelled letters are STATIC handshapes (held still):
 
 When distinguishing J from I: If the pinky is extended AND there is a curved downward motion, it is "J". If static, it is "I".
 
+## CRITICAL DISAMBIGUATION
+- **THANK-YOU vs NICE-TO-MEET-YOU**: THANK-YOU = single motion, flat hand starts at CHIN and moves outward. NICE-TO-MEET-YOU = THREE distinct movements: (1) flat hand slides across palm, (2) index fingers come together, (3) point forward. If you see multiple movements, it is likely "Nice to meet you", NOT "Thank you".
+- **WHERE vs NICE**: WHERE = index finger waves side to side (small repetitive motion). NICE = flat hand slides ACROSS the other palm (larger forward motion). They look different — check palm orientation and motion path.
+- **J vs I vs ILY vs Y**: Count extended fingers carefully. J = pinky only + downward curve motion. I = pinky only + static. ILY = thumb + index + pinky. Y = thumb + pinky only.
+- **Single sign vs phrase**: If you see 2-3 distinct movements with brief pauses between them, interpret as a phrase (e.g., NICE + MEET + YOU = "Nice to meet you"), not a single sign.
+
 ## Instructions
 1. Determine if this clip is fingerspelling or a lexical sign by analyzing the FULL sequence (all frames).
    - Only output a single letter if the sequence is overwhelmingly static and matches one letter handshape throughout.
@@ -198,8 +223,8 @@ export function captureVideoFrame(video: HTMLVideoElement): VideoFrame | null {
 
   try {
     const canvas = document.createElement('canvas');
-    // Use smaller resolution for API efficiency
-    const scale = 0.5;
+    // Higher resolution for better ASL hand shape recognition
+    const scale = 0.75;
     canvas.width = video.videoWidth * scale;
     canvas.height = video.videoHeight * scale;
 
@@ -211,7 +236,7 @@ export function captureVideoFrame(video: HTMLVideoElement): VideoFrame | null {
     ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
     return {
       dataUrl,

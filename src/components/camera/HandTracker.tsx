@@ -50,6 +50,9 @@ export function HandTracker({
   const cachedHandResultRef = useRef<HandLandmarkResult | null>(null);
   const cachedFaceResultRef = useRef<FaceLandmarkResult | null>(null);
 
+  // Frame counter for throttling non-critical detection (face)
+  const detectionFrameCountRef = useRef(0);
+
   // Track last gesture for stability
   const lastGestureRef = useRef<string | null>(null);
   const gestureCountRef = useRef(0);
@@ -185,17 +188,24 @@ export function HandTracker({
           resizeCanvas();
         }
 
-        // Detect hands and face
+        // Always detect hands (priority — this powers the red skeleton)
         const handResult = detectHands(videoElement, now);
-        const faceResult = detectFace(videoElement, now);
-
-        // Cache results for smooth drawing
         cachedHandResultRef.current = handResult;
-        cachedFaceResultRef.current = faceResult;
 
-        // Detect gestures (if enabled)
+        detectionFrameCountRef.current++;
+
+        // Throttle face detection to every 3rd frame to free CPU for hands
+        if (detectionFrameCountRef.current % 3 === 0) {
+          const faceResult = detectFace(videoElement, now);
+          cachedFaceResultRef.current = faceResult;
+        }
+
+        // Use cached face result for callbacks
+        const faceResult = cachedFaceResultRef.current;
+
+        // Detect gestures (if enabled) — also throttle to every other frame
         let detectedGesture: GestureResult | null = null;
-        if (enableGestureRecognition && onGestureDetected) {
+        if (enableGestureRecognition && onGestureDetected && detectionFrameCountRef.current % 2 === 0) {
           const gestureResult = detectGestures(videoElement, now);
           const primaryGesture = getPrimaryGesture(gestureResult);
 

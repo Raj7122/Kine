@@ -13,7 +13,10 @@ export interface RuntimeCorrectionResult {
   applied?: LearnedCorrection;
 }
 
-const RUNTIME_MIN_OCCURRENCES = 3;
+// Raised from 3 to 999 to effectively disable stale corrections.
+// The learned_corrections table has poisoned data from mock/rate-limited sessions.
+// Clear the table in Supabase dashboard, then set this back to 3.
+const RUNTIME_MIN_OCCURRENCES = 999;
 const CACHE_TTL_MS = 10_000;
 
 let cachedAt = 0;

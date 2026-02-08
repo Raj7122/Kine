@@ -42,6 +42,7 @@ export function validateSignRecognizeRequestBody(
   const frames = body.frames;
   const videoFrames = body.videoFrames;
   const sessionId = body.sessionId;
+  const lstmHint = body.lstmHint;
 
   if (!Array.isArray(frames)) {
     return { ok: false, error: { error: 'frames must be an array', status: 400 } };
@@ -94,12 +95,19 @@ export function validateSignRecognizeRequestBody(
     }
   }
 
+  if (lstmHint !== undefined && lstmHint !== null) {
+    if (!isString(lstmHint) || lstmHint.length > 500) {
+      return { ok: false, error: { error: 'Invalid lstmHint', status: 400 } };
+    }
+  }
+
   return {
     ok: true,
     value: {
       frames: frames as SignRecognizeRequestBody['frames'],
       videoFrames: videoFrames as SignRecognizeRequestBody['videoFrames'],
       sessionId: sessionId as SignRecognizeRequestBody['sessionId'],
+      lstmHint: (lstmHint as string) || undefined,
     },
   };
 }
