@@ -13,10 +13,7 @@ export interface RuntimeCorrectionResult {
   applied?: LearnedCorrection;
 }
 
-// Raised from 3 to 999 to effectively disable stale corrections.
-// The learned_corrections table has poisoned data from mock/rate-limited sessions.
-// Clear the table in Supabase dashboard, then set this back to 3.
-const RUNTIME_MIN_OCCURRENCES = 999;
+const RUNTIME_MIN_OCCURRENCES = 2;
 const CACHE_TTL_MS = 10_000;
 
 let cachedAt = 0;
@@ -63,13 +60,23 @@ export function buildRuntimeCorrectionMap(rows: LearnedCorrection[]): Map<string
       }
     }
 
-    if (byCorrect.size !== 1) {
+    if (byCorrect.size === 0) {
       continue;
     }
 
-    const only = byCorrect.values().next().value as LearnedCorrection | undefined;
-    if (only) {
-      map.set(key, only);
+    // Pick the correction with the highest occurrence count.
+    // If the top candidate has strictly more occurrences than the runner-up,
+    // use it. If tied, skip (too ambiguous).
+    const sorted = [...byCorrect.values()].sort(
+      (a, b) => b.occurrenceCount - a.occurrenceCount
+    );
+    const top = sorted[0];
+    const runnerUp = sorted[1];
+
+    if (!top) continue;
+
+    if (!runnerUp || top.occurrenceCount > runnerUp.occurrenceCount) {
+      map.set(key, top);
     }
   }
 
