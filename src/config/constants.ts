@@ -1,8 +1,4 @@
 // Configuration constants for Kine app
-// Phase 1-4: USE_MOCK_DATA = true
-// Phase 5: Set to false for real backend
-
-export const USE_MOCK_DATA = false;
 
 // =============================================================================
 // Detection Parameters (tuned for optimal ASL recognition)

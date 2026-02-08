@@ -16,7 +16,7 @@ export default function FeedbackTestPage() {
     originalText: translationText,
     corrected: false,
     confidence: 0.5,
-    source: 'mock',
+    source: 'gemini',
   };
 
   return (

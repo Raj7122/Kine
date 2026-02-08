@@ -39,7 +39,7 @@ export interface TranslationResult {
   recognition: SignRecognizeResult;
   gloss: string[];
   category: string;
-  source: 'gesture' | 'openai' | 'openai-vision' | 'gemini' | 'gemini-vision' | 'mock';
+  source: 'gesture' | 'openai' | 'openai-vision' | 'gemini' | 'gemini-vision';
   lstmHint?: string | null;
 }
 
@@ -211,7 +211,7 @@ export function useSigningModeTranslation(
       let result: TranslationResult;
       let recognizedText = '';
       let recognitionConfidence = 0;
-      let recognitionSource: SignRecognizeResult['source'] = 'mock';
+      let recognitionSource: SignRecognizeResult['source'] = 'gemini';
       let recognizedOriginalText = '';
       let recognizedCorrected = false;
       let recognizedSampleId: string | undefined;

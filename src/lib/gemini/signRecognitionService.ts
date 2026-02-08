@@ -331,8 +331,7 @@ export async function recognizeSign(
   }
 
   if (!isGeminiMultimodalConfigured) {
-    console.log('[SignRecognition] Gemini not configured, using mock');
-    return getMockRecognition();
+    throw new Error('Gemini API key not configured. Set GEMINI_API_KEY in your environment.');
   }
 
   try {
@@ -418,37 +417,14 @@ export async function recognizeSign(
     console.log('[SignRecognition] Gemini response:', cleanedText);
 
     return {
-      text: cleanedText || 'Hello',
-      confidence: buffer.videoFrames.length > 0 ? 0.9 : 0.75,
+      text: cleanedText || '',
+      confidence: cleanedText ? (buffer.videoFrames.length > 0 ? 0.9 : 0.75) : 0,
       source: buffer.videoFrames.length > 0 ? 'gemini-vision' : 'gemini',
     };
   } catch (error) {
     console.error('[SignRecognition] Error:', error);
-    return getMockRecognition();
+    throw error;
   }
-}
-
-/**
- * Mock recognition for testing/fallback
- */
-function getMockRecognition(): SignRecognitionResult {
-  const mockPhrases = [
-    'Hello',
-    'Thank you',
-    'How are you?',
-    'Nice to meet you',
-    'Please help me',
-    'Yes',
-    'No',
-  ];
-
-  const randomPhrase = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
-
-  return {
-    text: randomPhrase,
-    confidence: 0.5,
-    source: 'mock',
-  };
 }
 
 /**

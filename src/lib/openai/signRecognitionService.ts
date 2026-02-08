@@ -217,30 +217,8 @@ export async function recognizeSignWithOpenAI(
     };
   } catch (error) {
     console.error('[OpenAI SignRecognition] Error:', error);
-    return getMockRecognition();
+    throw error;
   }
-}
-
-/**
- * Mock recognition for testing/fallback
- */
-function getMockRecognition(): SignRecognitionResult {
-  const mockPhrases = [
-    'Hello',
-    'Thank you',
-    'Nice to meet you',
-    'How are you?',
-    'My name is...',
-    'Please help me',
-  ];
-
-  const randomPhrase = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
-
-  return {
-    text: randomPhrase,
-    confidence: 0.5,
-    source: 'mock',
-  };
 }
 
 /**

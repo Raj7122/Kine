@@ -5,8 +5,7 @@ export type SignRecognizeSource =
   | 'gemini-vision'
   | 'openai'
   | 'openai-vision'
-  | 'gesture'
-  | 'mock';
+  | 'gesture';
 
 export interface SignRecognizeRequestBody {
   frames: SignLandmarkData[];

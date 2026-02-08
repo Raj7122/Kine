@@ -2,7 +2,6 @@
 
 import { useCallback, useRef, useState, useEffect } from 'react';
 import { saveMessage } from '@/lib/supabase';
-import { USE_MOCK_DATA } from '@/config/constants';
 import { useAppStore } from '@/store/useAppStore';
 
 // Web Speech API types
@@ -61,7 +60,7 @@ export interface SpeechTranslationResult {
   id: string;
   spokenText: string;
   gloss: string[];
-  source: 'gemini' | 'mock';
+  source: 'gemini' | 'api';
 }
 
 export interface UseSpeechRecognitionReturn {
@@ -192,46 +191,25 @@ export function useSpeechRecognition(
     try {
       let result: SpeechTranslationResult;
 
-      // Use server-side API for translation (keeps API keys secure)
-      if (!USE_MOCK_DATA) {
-        console.log('[Speech] Translating via API:', text);
+      console.log('[Speech] Translating via API:', text);
 
-        const response = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-        });
+      const response = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
 
-        const data = await response.json();
+      const data = await response.json();
 
-        if (data.success) {
-          result = {
-            id: crypto.randomUUID(),
-            spokenText: text,
-            gloss: data.gloss,
-            source: data.source === 'gemini' ? 'gemini' : 'mock',
-          };
-        } else {
-          throw new Error(data.error || 'Translation failed');
-        }
-      } else {
-        // Mock translation - convert words to uppercase
-        // Handle single letters for fingerspelling
-        console.log('[Speech] Using mock translation');
-        const mockGloss = text
-          .toUpperCase()
-          .split(/\s+/)
-          .filter((word) => word.length > 0)
-          .map((word) => word.replace(/[^A-Z]/g, '')) // Remove non-letters
-          .filter((word) => word.length > 0)
-          .slice(0, 10);
-
+      if (data.success) {
         result = {
           id: crypto.randomUUID(),
           spokenText: text,
-          gloss: mockGloss.length > 0 ? mockGloss : [text.toUpperCase() || 'HELLO'],
-          source: 'mock',
+          gloss: data.gloss,
+          source: data.source === 'gemini' ? 'gemini' : 'api',
         };
+      } else {
+        throw new Error(data.error || 'Translation failed');
       }
 
       console.log('[Speech] Translation result:', result.gloss);

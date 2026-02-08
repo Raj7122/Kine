@@ -2,7 +2,6 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { MotionDetector, type LandmarkResult } from '@/lib/mediapipe';
-import { getMockTranslation } from '@/lib/translation';
 import {
   createLandmarkBuffer,
   captureVideoFrame,
@@ -11,7 +10,7 @@ import {
 } from '@/lib/gemini';
 import { synthesizeSpeech, playAudioBlob } from '@/lib/elevenlabs';
 import { saveMessage } from '@/lib/supabase';
-import { SILENCE_TRIGGER_THRESHOLD, USE_MOCK_DATA, MAX_BUFFER_SIZE } from '@/config/constants';
+import { SILENCE_TRIGGER_THRESHOLD, MAX_BUFFER_SIZE } from '@/config/constants';
 import { useAppStore } from '@/store/useAppStore';
 import type { SignRecognizeResult } from '@/lib/sign-recognition/types';
 
@@ -298,41 +297,28 @@ export function useTranslation(
 
       // Step 2: Translation - Gemini as "The Linguist"
       // Convert English text to ASL Gloss
-      if (!USE_MOCK_DATA) {
-        console.log('[Translation] Step 2: Translation via /api/translate');
+      console.log('[Translation] Step 2: Translation via /api/translate');
 
-        const response = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: recognition.text }),
-        });
+      const glossResponse = await fetch('/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: recognition.text }),
+      });
 
-        const data = await response.json().catch(() => null);
-        if (!response.ok || !data?.success || !Array.isArray(data.gloss)) {
-          throw new Error(data?.error || 'Gloss translation failed');
-        }
-
-        result = {
-          id: crypto.randomUUID(),
-          input: recognition.text,
-          recognition,
-          gloss: data.gloss,
-          category: 'translation',
-          source: recognition.source,
-        };
-        console.log('[Translation] Gloss sequence:', result.gloss);
-      } else {
-        console.log('[Translation] Using mock translation');
-        const mockResult = await getMockTranslation(1000);
-        result = {
-          id: mockResult.id,
-          input: recognition.text,
-          recognition,
-          gloss: mockResult.gloss,
-          category: mockResult.category,
-          source: 'mock',
-        };
+      const glossData = await glossResponse.json().catch(() => null);
+      if (!glossResponse.ok || !glossData?.success || !Array.isArray(glossData.gloss)) {
+        throw new Error(glossData?.error || 'Gloss translation failed');
       }
+
+      result = {
+        id: crypto.randomUUID(),
+        input: recognition.text,
+        recognition,
+        gloss: glossData.gloss,
+        category: 'translation',
+        source: recognition.source,
+      };
+      console.log('[Translation] Gloss sequence:', result.gloss);
 
       setTranslation(result);
       setState('complete');

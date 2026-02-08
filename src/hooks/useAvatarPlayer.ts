@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { buildPlaybackQueue, type PlaybackItem, FALLBACK_DURATION_MS } from '@/lib/avatar';
+import { buildPlaybackQueueAsync, type PlaybackItem, FALLBACK_DURATION_MS } from '@/lib/avatar';
 
 export interface UseAvatarPlayerReturn {
   // State
@@ -41,10 +41,10 @@ export function useAvatarPlayer(): UseAvatarPlayerReturn {
   }, [currentItem]);
 
   // Start playing a sequence
-  const playSequence = useCallback((glossSequence: string[]) => {
+  const playSequence = useCallback(async (glossSequence: string[]) => {
     if (glossSequence.length === 0) return;
 
-    const playbackQueue = buildPlaybackQueue(glossSequence);
+    const playbackQueue = await buildPlaybackQueueAsync(glossSequence);
     queueRef.current = playbackQueue;
     currentIndexRef.current = 0;
 

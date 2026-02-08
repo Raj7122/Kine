@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { USE_MOCK_DATA, SIGN_RECOGNITION_FRAME_COUNT } from '@/config/constants';
+import { SIGN_RECOGNITION_FRAME_COUNT } from '@/config/constants';
 import {
   ASL_INTERPRETATION_PROMPT,
   formatLandmarksForPrompt,
@@ -129,18 +129,6 @@ function cleanGeminiResponseText(responseText: string): string {
   return cleaned.trim();
 }
 
-function getMockResult(): SignRecognizeResult {
-  const mockPhrases = ['Hello', 'Thank you', 'How are you?', 'Nice to meet you', 'Please help me', 'Yes', 'No'];
-  const text = mockPhrases[Math.floor(Math.random() * mockPhrases.length)];
-  return {
-    text,
-    originalText: text,
-    corrected: false,
-    confidence: 0.5,
-    source: 'mock',
-  };
-}
-
 export async function POST(request: NextRequest) {
   try {
     const contentLength = getContentLengthBytes(request.headers);
@@ -197,11 +185,6 @@ export async function POST(request: NextRequest) {
 
     const persistedSampleId = await persistSignRecognitionSample(sessionId, frames, videoFrames);
     const sampleId = persistedSampleId ?? undefined;
-
-    if (USE_MOCK_DATA) {
-      console.warn('[SignRecognize API] USE_MOCK_DATA is enabled — returning mock data');
-      return NextResponse.json({ success: true, ...getMockResult(), sampleId });
-    }
 
     const provider = getProvider();
     if (provider === 'none') {
@@ -362,7 +345,14 @@ export async function POST(request: NextRequest) {
         responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       }
 
-      const originalText = cleanGeminiResponseText(responseText) || 'Hello';
+      const originalText = cleanGeminiResponseText(responseText);
+
+      if (!originalText) {
+        console.warn('[SignRecognize API] AI returned empty response');
+        return NextResponse.json(
+          { success: true, text: '', originalText: '', corrected: false, confidence: 0, source: provider, sampleId },
+        );
+      }
 
       const baseSource = (videoFrames.length > 0 ? `${provider}-vision` : provider) as SignRecognizeResult['source'];
       const baseConfidence = videoFrames.length > 0 ? 0.9 : 0.75;
