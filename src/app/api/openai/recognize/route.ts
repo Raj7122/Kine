@@ -54,8 +54,25 @@ MY/MINE: Flat palm on chest
 - V: Index + Middle (peace sign)
 - C: Curved like holding cup
 
+## FINGERSPELLED LETTERS (CRITICAL - commonly confused)
+These are SINGLE LETTERS from the ASL manual alphabet:
+- **I**: ONLY pinky extended, hand STATIC (no movement), palm facing viewer
+- **J**: ONLY pinky extended, hand traces a J-curve DOWNWARD (dynamic motion required!)
+- **Y**: Thumb + Pinky extended (NO index finger), hand STATIC
+- **I-LOVE-YOU (ILY)**: Thumb + Index + Pinky ALL extended together — this is NOT a letter, it's a sign
+
+## CRITICAL DISAMBIGUATION: J vs I vs ILY vs Y
+1. Count the extended fingers carefully across ALL frames:
+   - 1 finger (pinky only) + NO motion = letter "I"
+   - 1 finger (pinky only) + DOWNWARD CURVE motion = letter "J"
+   - 2 fingers (thumb + pinky, index folded) = letter "Y"
+   - 3 fingers (thumb + index + pinky) = "I love you" (ILY)
+2. For "J": the KEY indicator is the pinky tracing a curved/hook path downward across frames
+3. If the hint says "ILY" but you only see pinky extended (no index, no thumb), override the hint — it is "I" or "J"
+
 ## OUTPUT FORMAT
-- Return ONLY the English word(s) that match the sign
+- Return ONLY the English word(s) or letter that match the sign
+- For fingerspelled letters, return just the letter: "J", "I", "Y"
 - If multiple signs in sequence, list them naturally: "thank you", "how are you"
 - Be brief and direct
 - NEVER explain or describe - just give the meaning

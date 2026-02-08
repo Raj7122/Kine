@@ -1,0 +1,38 @@
+{
+  "vocabulary": [
+    "BAD",
+    "FINISH",
+    "GOOD",
+    "GOODBYE",
+    "HELLO",
+    "HELP",
+    "HOW",
+    "I",
+    "LIKE",
+    "MAYBE",
+    "NAME",
+    "NEED",
+    "NO",
+    "PLEASE",
+    "SORRY",
+    "THANK_YOU",
+    "UNDERSTAND",
+    "WANT",
+    "WHAT",
+    "WHEN",
+    "WHERE",
+    "WHO",
+    "WHY",
+    "YES",
+    "YOU"
+  ],
+  "num_classes": 25,
+  "window_size": 16,
+  "feature_count": 63,
+  "model_type": "cnn_lstm",
+  "input_shape": [
+    16,
+    63
+  ],
+  "description": "LSTM model for ASL dynamic sign recognition trained on WLASL dataset"
+}

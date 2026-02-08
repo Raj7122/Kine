@@ -48,6 +48,16 @@ scripts/how2sign/
 __pycache__/
 *.pyc
 
+# LSTM training artifacts (re-download/retrain locally)
+scripts/lstm_training/venv/
+scripts/lstm_training/data/
+scripts/lstm_training/cache/
+scripts/lstm_training/models/
+scripts/lstm_training/=0.16.1
+
+# Kaggle pretrained model repos (clone separately if needed)
+pretrained_models/
+
 # Supabase
 supabase/.temp/
 

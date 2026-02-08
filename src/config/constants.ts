@@ -22,7 +22,7 @@ export const MEDIAPIPE_LANDMARK_CONFIDENCE = 0.65; // Balanced confidence for be
 export const MIN_MOTION_THRESHOLD = 0.023; // ~15px / 640px normalized - captures subtle movements
 export const CONSECUTIVE_FRAME_REQUIREMENT = 4; // ~130ms natural latency at 30fps
 export const Z_AXIS_SMOOTHING = 0.80; // Smooth depth tracking
-export const MAX_ACCELERATION = 0.156; // ~100px / 640px normalized - catches artifacts
+export const MAX_ACCELERATION = 0.25; // ~160px / 640px normalized - allows quick finger motions (J, Z) while catching artifacts
 
 // Hand tracking
 export const HAND_SEPARATION_DISTANCE = 0.031; // ~20px / 640px normalized - prevents false merging

@@ -1,5 +1,5 @@
 // LSTM Service for Dynamic ASL Gesture Recognition
-// Uses TensorFlow.js for in-browser inference
+// Uses server-side API for inference (model too large for browser)
 
 import type {
   LSTMPrediction,
@@ -28,6 +28,7 @@ let model: TFLayersModel | null = null;
 let isLoading = false;
 let loadError: string | null = null;
 let tfjs: typeof import('@tensorflow/tfjs') | null = null;
+let useAPIFallback = false; // Use API when browser model unavailable
 
 /**
  * Initialize TensorFlow.js and configure backend
@@ -55,10 +56,11 @@ async function initTensorFlow(): Promise<typeof import('@tensorflow/tfjs')> {
 
 /**
  * Load the LSTM model from public directory
+ * Falls back to API endpoint if browser model unavailable
  */
 export async function loadModel(): Promise<boolean> {
-  if (model) {
-    console.log('[LSTM] Model already loaded');
+  if (model || useAPIFallback) {
+    console.log('[LSTM] Model already loaded or using API fallback');
     return true;
   }
 
@@ -88,20 +90,28 @@ export async function loadModel(): Promise<boolean> {
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    console.error('[LSTM] Failed to load model:', message);
-    loadError = message;
+    console.warn('[LSTM] Failed to load browser model:', message);
+    console.log('[LSTM] Switching to API fallback mode');
+    useAPIFallback = true;
+    loadError = null; // Clear error since we have a fallback
     isLoading = false;
-    return false;
+    return true; // Return true since API fallback is available
   }
 }
 
 /**
  * Run LSTM inference on a window of normalized frames
+ * Uses browser model or API endpoint based on availability
  */
 export async function predictSign(
   normalizedFrames: NormalizedFrame[],
   windowTimestamps: { start: number; end: number }
 ): Promise<LSTMPrediction | null> {
+  // Use API fallback if browser model not available
+  if (useAPIFallback) {
+    return predictSignViaAPI(normalizedFrames, windowTimestamps);
+  }
+
   if (!model) {
     console.warn('[LSTM] Model not loaded, cannot predict');
     return null;
@@ -171,6 +181,57 @@ export async function predictSign(
 }
 
 /**
+ * Run LSTM inference via API endpoint
+ */
+async function predictSignViaAPI(
+  normalizedFrames: NormalizedFrame[],
+  windowTimestamps: { start: number; end: number }
+): Promise<LSTMPrediction | null> {
+  try {
+    // Convert frames to raw landmark arrays
+    const landmarks = normalizedFrames.map(frame => frame.features);
+
+    const response = await fetch('/api/lstm/predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ landmarks }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      console.error('[LSTM API] Prediction failed:', error);
+      return null;
+    }
+
+    const result = await response.json();
+
+    // Convert API response to LSTMPrediction format
+    const allProbabilities: Record<string, number> = {};
+    result.top3?.forEach((item: { sign: string; confidence: number }) => {
+      allProbabilities[item.sign] = item.confidence;
+    });
+
+    const prediction: LSTMPrediction = {
+      class: result.sign as LSTMSignClass,
+      confidence: result.confidence,
+      timestamp: Date.now(),
+      windowStart: windowTimestamps.start,
+      windowEnd: windowTimestamps.end,
+      allProbabilities,
+    };
+
+    console.log(
+      `[LSTM API] Prediction: ${result.sign} (${(result.confidence * 100).toFixed(1)}%)`
+    );
+
+    return prediction;
+  } catch (error) {
+    console.error('[LSTM API] Request failed:', error);
+    return null;
+  }
+}
+
+/**
  * Check if prediction meets confidence threshold
  */
 export function isConfidentPrediction(prediction: LSTMPrediction | null): boolean {
@@ -196,11 +257,12 @@ export function getModelMetadata(): LSTMModelMetadata | null {
 export function getLSTMServiceState(): Pick<
   TemporalDetectorState,
   'isModelLoaded' | 'isModelLoading' | 'error'
-> {
+> & { useAPIFallback: boolean } {
   return {
-    isModelLoaded: model !== null,
+    isModelLoaded: model !== null || useAPIFallback,
     isModelLoading: isLoading,
     error: loadError,
+    useAPIFallback,
   };
 }
 
@@ -219,7 +281,14 @@ export function disposeModel(): void {
  * Check if model is ready for inference
  */
 export function isModelReady(): boolean {
-  return model !== null && !isLoading;
+  return (model !== null || useAPIFallback) && !isLoading;
+}
+
+/**
+ * Check if using API fallback mode
+ */
+export function isUsingAPIFallback(): boolean {
+  return useAPIFallback;
 }
 
 // Browser console testing utilities

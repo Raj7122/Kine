@@ -31,10 +31,13 @@ export interface FaceLandmarkResult {
   faceBlendshapes?: Classifications[];
 }
 
+// Gesture result from MediaPipe Gesture Recognizer
 export interface GestureResult {
   gesture: string;
-  aslMeaning: string;
   confidence: number;
+  aslMeaning: string;
+  handedness: string;
+  landmarks: Array<{ x: number; y: number; z: number }>;
 }
 
 export interface LandmarkResult {

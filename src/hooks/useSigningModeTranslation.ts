@@ -128,6 +128,7 @@ export function useSigningModeTranslation(
   const silenceStartRef = useRef<number | null>(null);
   const handsLostTimeRef = useRef<number | null>(null); // Track when hands left frame
   const isProcessingRef = useRef(false);
+  const completeCooldownRef = useRef(false); // Prevents state changes during result display
   const landmarkBufferRef = useRef<SignLandmarkData[]>([]);
   const videoFrameBufferRef = useRef<VideoFrame[]>([]);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -216,16 +217,18 @@ export function useSigningModeTranslation(
       let recognizedSampleId: string | undefined;
       const lstmHint = getLSTMHint();
 
-      // Step 0: Check for MediaPipe gesture (FAST - no API call!)
+      // Build hints from MediaPipe gesture + LSTM for Gemini context
       const gestureResult = lastGestureRef.current;
-      if (gestureResult && gestureResult.confidence >= GESTURE_CONFIDENCE_THRESHOLD && gestureResult.gesture !== 'None') {
-        console.log('[SigningModeTranslation] Using MediaPipe gesture:', gestureResult.gesture, '->', gestureResult.aslMeaning);
-        recognizedText = gestureResult.aslMeaning;
-        recognitionSource = 'gesture';
-        recognitionConfidence = gestureResult.confidence;
+      const gestureHint = gestureResult && gestureResult.confidence >= GESTURE_CONFIDENCE_THRESHOLD && gestureResult.gesture !== 'None'
+        ? `MediaPipe gesture detected: ${gestureResult.gesture} → "${gestureResult.aslMeaning}" (confidence: ${(gestureResult.confidence * 100).toFixed(0)}%)`
+        : null;
+
+      if (gestureHint) {
+        console.log('[SigningModeTranslation] Gesture hint for Gemini:', gestureHint);
       }
-      // Step 1: Fall back to Gemini 3.0 Flash for complex signs/sentences
-      else if (landmarkBufferRef.current.length > 5) {
+
+      // Step 1: Always use Gemini for maximum accuracy (gesture is just a hint, never short-circuits)
+      if (landmarkBufferRef.current.length > 5) {
         console.log('[SigningModeTranslation] Step 1: Gemini Sign Recognition');
         if (lstmHint) {
           console.log('[SigningModeTranslation] LSTM hint:', lstmHint);
@@ -236,10 +239,13 @@ export function useSigningModeTranslation(
           videoFrames: videoFrameBufferRef.current.length,
         });
 
+        // Combine LSTM + gesture hints for Gemini context
+        const combinedHint = [lstmHint, gestureHint].filter(Boolean).join('. ') || null;
+
         const geminiResult = await recognizeSignWithGemini(
           landmarkBufferRef.current,
           videoFrameBufferRef.current,
-          { sessionId: sessionId ?? undefined, lstmHint }
+          { sessionId: sessionId ?? undefined, lstmHint: combinedHint }
         );
         recognizedText = geminiResult.text;
         recognitionSource = geminiResult.source;
@@ -339,6 +345,7 @@ export function useSigningModeTranslation(
 
       setTranslation(result);
       setState('complete');
+      completeCooldownRef.current = true; // Lock state during result display
 
       // Save to database (non-blocking)
       if (sessionId) {
@@ -371,6 +378,9 @@ export function useSigningModeTranslation(
   const processLandmarks = useCallback(
     (result: LandmarkResult) => {
       if (isProcessingRef.current) return;
+
+      // During result display cooldown, ignore landmarks so user can read the result
+      if (completeCooldownRef.current) return;
 
       const detector = motionDetectorRef.current;
       detector.update(result.hands);
@@ -552,6 +562,7 @@ export function useSigningModeTranslation(
     handsLostTimeRef.current = null;
     isProcessingRef.current = false;
     isCapturingRef.current = false; // Stop independent frame capture
+    completeCooldownRef.current = false; // Unlock state changes
     motionDetectorRef.current.reset();
     landmarkBufferRef.current = [];
     videoFrameBufferRef.current = [];

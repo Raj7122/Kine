@@ -5,12 +5,14 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
 import { ModeToggle } from '@/components/ui/ModeToggle';
 import { TranscriptionBox } from '@/components/ui/TranscriptionBox';
+import { SubtitleOverlay } from '@/components/ui/SubtitleOverlay';
 import { TopBar } from '@/components/ui/TopBar';
 import { Waveform } from '@/components/ui/Waveform';
 import { CameraFeed } from '@/components/camera/CameraFeed';
 import { HandTracker } from '@/components/camera/HandTracker';
 import { AvatarPlayer, isQuickMode, setQuickMode } from '@/components/avatar/AvatarPlayer';
 import { SettingsModal, HistoryModal } from '@/components/modals';
+import { DebugOverlay } from '@/components/ui/DebugOverlay';
 import { TRANSITION_DURATION } from '@/config/constants';
 import type { LandmarkResult } from '@/lib/mediapipe';
 import { useSigningModeTranslation, type TranslationState } from '@/hooks/useSigningModeTranslation';
@@ -66,42 +68,47 @@ interface ViewProps {
 function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [lastCompletedTranslationId, setLastCompletedTranslationId] = useState<string | null>(null);
+  const [showDebug, setShowDebug] = useState(true); // Debug overlay visible by default
   const {
     setProcessing,
     setLastTranslation,
     setGlossSequence,
   } = useAppStore();
 
-  // Translation hook - handles motion detection, LSTM, and translation triggering
+  // Translation hook - handles motion detection, LSTM, gesture recognition, and translation triggering
   const {
     state: translationState,
     translationError,
     translationRetryAfterUntil,
     silenceProgress,
+    currentGesture,
+    translation,
     processLandmarks,
     setVideoElement: setTranslationVideoElement,
     reset: resetTranslation,
     lstmPrediction,
     lstmEnabled,
     isDynamicModeActive,
-  } = useSigningModeTranslation((translation) => {
+    landmarkBufferSize,
+    videoFrameBufferSize,
+  } = useSigningModeTranslation((translationResult) => {
     // Called when translation completes
-    console.log('[SigningView] Translation complete:', translation);
+    console.log('[SigningView] Translation complete:', translationResult);
 
     // Store the translation result
-    setLastCompletedTranslationId(translation.id);
-    setLastTranslation(translation.recognition);
-    setGlossSequence(translation.gloss);
+    setLastCompletedTranslationId(translationResult.id);
+    setLastTranslation(translationResult.recognition);
+    setGlossSequence(translationResult.gloss);
   });
 
-  // Reset after a brief delay so user can continue signing
+  // Reset after a delay so user can read the result
   // The audio has already played during processing
   useEffect(() => {
     if (translationState === 'complete') {
       const timeout = setTimeout(() => {
         resetTranslation();
         console.log('[SigningView] Ready for next sign');
-      }, 1500);
+      }, 4000);
       return () => clearTimeout(timeout);
     }
     // Auto-clear error state after cooldown so user can retry
@@ -165,6 +172,28 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
         onLandmarksDetected={handleLandmarksDetected}
         showFaceMesh={false}
       />
+
+      {/* Debug Overlay - shows recognition state, buffer sizes, etc. */}
+      <DebugOverlay
+        state={translationState}
+        silenceProgress={silenceProgress}
+        translation={translation}
+        currentGesture={currentGesture}
+        lstmPrediction={lstmPrediction}
+        lstmEnabled={lstmEnabled}
+        isDynamicModeActive={isDynamicModeActive}
+        landmarkBufferSize={landmarkBufferSize}
+        videoFrameBufferSize={videoFrameBufferSize}
+        isVisible={showDebug}
+      />
+
+      {/* Debug Toggle Button */}
+      <button
+        onClick={() => setShowDebug(!showDebug)}
+        className="absolute top-4 right-20 z-40 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white/70 hover:bg-black/70 hover:text-white transition-colors"
+      >
+        {showDebug ? 'Hide Debug' : 'Show Debug'}
+      </button>
 
       {/* Z-20: UI Layer */}
       <div className="absolute inset-0 z-20 flex flex-col">
