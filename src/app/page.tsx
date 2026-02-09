@@ -13,11 +13,11 @@ import { HandTracker } from '@/components/camera/HandTracker';
 import { AvatarPlayer, isQuickMode, setQuickMode } from '@/components/avatar/AvatarPlayer';
 import { SettingsModal, HistoryModal } from '@/components/modals';
 import { DebugOverlay } from '@/components/ui/DebugOverlay';
-import { TRANSITION_DURATION } from '@/config/constants';
+import { TRANSITION_DURATION, IS_DEV } from '@/config/constants';
 import type { LandmarkResult } from '@/lib/mediapipe';
 import { useSigningModeTranslation, type TranslationState } from '@/hooks/useSigningModeTranslation';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
-import { Play, Square, Mic, MicOff } from 'lucide-react';
+import { Play, Square, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 
 export default function Home() {
   const { mode } = useAppStore();
@@ -43,7 +43,7 @@ export default function Home() {
       </AnimatePresence>
 
       {/* Bottom Control Bar - Fixed across both modes */}
-      <div className="fixed bottom-0 left-0 right-0 z-30 flex h-[20vh] items-center justify-center bg-gradient-to-t from-black via-black/90 to-transparent">
+      <div className="fixed bottom-0 left-0 right-0 z-30 flex min-h-[120px] h-[18vh] items-center justify-center bg-gradient-to-t from-black via-black/90 to-transparent safe-area-bottom">
         <ModeToggle />
       </div>
 
@@ -69,6 +69,7 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   const [lastCompletedTranslationId, setLastCompletedTranslationId] = useState<string | null>(null);
   const [showDebug, setShowDebug] = useState(true); // Debug overlay visible by default
+  const [cameraEnabled, setCameraEnabled] = useState(true);
   const {
     setProcessing,
     setLastTranslation,
@@ -161,39 +162,66 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
       {/* Z-0: Camera Feed Background */}
       <CameraFeed
         className="absolute inset-0 h-full w-full"
+        enabled={cameraEnabled}
         onVideoReady={handleVideoReady}
         onError={handleCameraError}
       />
 
-      {/* Z-10: Hand Tracker Canvas Overlay */}
-      <HandTracker
-        videoElement={videoElement}
-        className="absolute inset-0 h-full w-full"
-        onLandmarksDetected={handleLandmarksDetected}
-        showFaceMesh={false}
-      />
+      {/* Z-10: Hand Tracker Canvas Overlay — hidden when camera is off */}
+      {cameraEnabled && (
+        <HandTracker
+          videoElement={videoElement}
+          className="absolute inset-0 h-full w-full"
+          onLandmarksDetected={handleLandmarksDetected}
+          showFaceMesh={false}
+        />
+      )}
 
-      {/* Debug Overlay - shows recognition state, buffer sizes, etc. */}
-      <DebugOverlay
-        state={translationState}
-        silenceProgress={silenceProgress}
-        translation={translation}
-        currentGesture={currentGesture}
-        lstmPrediction={lstmPrediction}
-        lstmEnabled={lstmEnabled}
-        isDynamicModeActive={isDynamicModeActive}
-        landmarkBufferSize={landmarkBufferSize}
-        videoFrameBufferSize={videoFrameBufferSize}
-        isVisible={showDebug}
-      />
+      {/* Camera Paused Overlay */}
+      {!cameraEnabled && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-gray-900">
+          <VideoOff className="h-16 w-16 text-gray-500" />
+          <p className="mt-4 text-lg font-medium text-gray-400">Camera Paused</p>
+          <p className="mt-1 text-sm text-gray-500">Tap the camera button to resume</p>
+        </div>
+      )}
 
-      {/* Debug Toggle Button */}
+      {/* Camera Toggle Button */}
       <button
-        onClick={() => setShowDebug(!showDebug)}
-        className="absolute top-4 right-20 z-40 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white/70 hover:bg-black/70 hover:text-white transition-colors"
+        onClick={() => setCameraEnabled((prev) => !prev)}
+        className={`absolute top-4 right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full backdrop-blur-sm transition-colors ${
+          cameraEnabled
+            ? 'bg-black/50 text-yellow-400 hover:bg-black/70'
+            : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+        }`}
+        aria-label={cameraEnabled ? 'Pause camera' : 'Resume camera'}
       >
-        {showDebug ? 'Hide Debug' : 'Show Debug'}
+        {cameraEnabled ? <Video className="h-6 w-6" /> : <VideoOff className="h-6 w-6" />}
       </button>
+
+      {/* Debug Overlay - dev only */}
+      {IS_DEV && (
+        <>
+          <DebugOverlay
+            state={translationState}
+            silenceProgress={silenceProgress}
+            translation={translation}
+            currentGesture={currentGesture}
+            lstmPrediction={lstmPrediction}
+            lstmEnabled={lstmEnabled}
+            isDynamicModeActive={isDynamicModeActive}
+            landmarkBufferSize={landmarkBufferSize}
+            videoFrameBufferSize={videoFrameBufferSize}
+            isVisible={showDebug}
+          />
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            className="absolute top-4 right-20 z-40 rounded-full bg-black/50 px-3 py-1.5 text-xs text-white/70 hover:bg-black/70 hover:text-white transition-colors"
+          >
+            {showDebug ? 'Hide Debug' : 'Show Debug'}
+          </button>
+        </>
+      )}
 
       {/* Z-20: UI Layer */}
       <div className="absolute inset-0 z-20 flex flex-col">
@@ -223,8 +251,8 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
           </div>
         )}
 
-        {/* LSTM Prediction Indicator */}
-        {lstmPrediction && lstmEnabled && (
+        {/* LSTM Prediction Indicator - dev only */}
+        {IS_DEV && lstmPrediction && lstmEnabled && (
           <div className="mb-2 flex justify-center">
             <span className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-medium text-green-400">
               LSTM: {lstmPrediction.class} ({Math.round(lstmPrediction.confidence * 100)}%)
@@ -233,7 +261,7 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
         )}
 
         {/* Transcription Box - positioned above bottom bar */}
-        <div className="mb-[22vh] flex justify-center">
+        <div className="mb-[20vh] flex justify-center px-2">
           <TranscriptionBox
             translationState={translationState}
             translationError={translationError}
@@ -403,7 +431,7 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
         {/* Transcription Area - Large Yellow Text */}
         <div className="w-full max-w-md text-left">
           <div className="flex items-start justify-between">
-            <h2 className="flex-1 text-4xl font-bold leading-tight text-yellow-400">
+            <h2 className="flex-1 text-2xl sm:text-4xl font-bold leading-tight text-yellow-400">
               {displayText}
             </h2>
             {/* Mic indicator */}
@@ -439,67 +467,71 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
 
         {/* Avatar Display - Centered */}
         <div className="mt-6 flex flex-1 flex-col items-center justify-center">
-          <AvatarPlayer className="h-64 w-64" />
-          {/* Quick Mode Toggle */}
-          <button
-            onClick={handleQuickModeToggle}
-            className={`mt-3 rounded-full px-4 py-1.5 text-xs font-medium transition-colors ${
-              quickMode
-                ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
-            }`}
-          >
-            {quickMode ? '⚡ Quick Mode (Fast)' : '🤖 AWS GenASL (Slow)'}
-          </button>
-        </div>
-
-        {/* Test Controls - Phase 3 Demo */}
-        <div className="mb-4 w-full max-w-md">
-          <button
-            onClick={() => setIsTestMode(!isTestMode)}
-            className="mb-2 text-xs text-gray-500 hover:text-gray-400"
-          >
-            {isTestMode ? 'Hide Test Controls' : 'Show Test Controls'}
-          </button>
-
-          {isTestMode && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="rounded-lg bg-gray-900/80 p-3"
+          <AvatarPlayer className="h-48 w-48 sm:h-64 sm:w-64" />
+          {/* Quick Mode Toggle - dev only */}
+          {IS_DEV && (
+            <button
+              onClick={handleQuickModeToggle}
+              className={`mt-3 rounded-full px-4 py-1.5 text-xs font-medium transition-colors ${
+                quickMode
+                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                  : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+              }`}
             >
-              <p className="mb-2 text-xs font-medium text-gray-400">
-                Phase 3 Test - Gloss Sequences:
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {testSequences.map((test) => (
-                  <button
-                    key={test.label}
-                    onClick={() => handlePlaySequence(test.sequence)}
-                    className="flex items-center gap-1 rounded-full bg-yellow-400/20 px-3 py-1 text-xs font-medium text-yellow-400 transition-colors hover:bg-yellow-400/30"
-                  >
-                    <Play className="h-3 w-3" />
-                    {test.label}
-                  </button>
-                ))}
-                <button
-                  onClick={handleStop}
-                  className="flex items-center gap-1 rounded-full bg-red-400/20 px-3 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-400/30"
-                >
-                  <Square className="h-3 w-3" />
-                  Stop
-                </button>
-              </div>
-              <p className="mt-2 text-xs text-gray-500">
-                Or use console: <code className="text-yellow-400/70">playAvatarSequence([&quot;HELLO&quot;, &quot;WORLD&quot;])</code>
-              </p>
-            </motion.div>
+              {quickMode ? '⚡ Quick Mode (Fast)' : '🤖 AWS GenASL (Slow)'}
+            </button>
           )}
         </div>
 
+        {/* Test Controls - dev only */}
+        {IS_DEV && (
+          <div className="mb-4 w-full max-w-md">
+            <button
+              onClick={() => setIsTestMode(!isTestMode)}
+              className="mb-2 text-xs text-gray-500 hover:text-gray-400"
+            >
+              {isTestMode ? 'Hide Test Controls' : 'Show Test Controls'}
+            </button>
+
+            {isTestMode && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="rounded-lg bg-gray-900/80 p-3"
+              >
+                <p className="mb-2 text-xs font-medium text-gray-400">
+                  Phase 3 Test - Gloss Sequences:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {testSequences.map((test) => (
+                    <button
+                      key={test.label}
+                      onClick={() => handlePlaySequence(test.sequence)}
+                      className="flex items-center gap-1 rounded-full bg-yellow-400/20 px-3 py-1 text-xs font-medium text-yellow-400 transition-colors hover:bg-yellow-400/30"
+                    >
+                      <Play className="h-3 w-3" />
+                      {test.label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={handleStop}
+                    className="flex items-center gap-1 rounded-full bg-red-400/20 px-3 py-1 text-xs font-medium text-red-400 transition-colors hover:bg-red-400/30"
+                  >
+                    <Square className="h-3 w-3" />
+                    Stop
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-gray-500">
+                  Or use console: <code className="text-yellow-400/70">playAvatarSequence([&quot;HELLO&quot;, &quot;WORLD&quot;])</code>
+                </p>
+              </motion.div>
+            )}
+          </div>
+        )}
+
         {/* Waveform - Below Avatar, Above Bottom Bar */}
-        <div className="mb-[22vh] w-full max-w-md">
+        <div className="mb-[20vh] w-full max-w-md px-2">
           <Waveform isActive={true} />
         </div>
       </div>

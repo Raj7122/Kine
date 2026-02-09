@@ -8,18 +8,21 @@ export function ModeToggle() {
   const { mode, toggleMode, isProcessing } = useAppStore();
 
   const Icon = mode === 'SIGNING' ? Mic : Hand;
-  const label = mode === 'SIGNING' ? 'Switch to Listening' : 'Switch to Signing';
+  const label = mode === 'SIGNING' ? 'Listen' : 'Sign';
+  const ariaLabel = mode === 'SIGNING' ? 'Switch to Listening' : 'Switch to Signing';
 
   return (
     <motion.button
       onClick={toggleMode}
       disabled={isProcessing}
-      className="relative flex h-20 w-20 items-center justify-center rounded-full bg-yellow-400 text-black shadow-lg transition-colors hover:bg-yellow-300 focus:outline-none focus:ring-4 focus:ring-yellow-400/50 disabled:opacity-50"
+      className="relative flex flex-col items-center justify-center gap-1 rounded-full bg-yellow-400 px-6 py-3 text-black shadow-lg transition-colors hover:bg-yellow-300 focus:outline-none focus:ring-4 focus:ring-yellow-400/50 disabled:opacity-50"
+      style={{ minWidth: 88, minHeight: 88 }}
       whileTap={{ scale: 0.95 }}
       whileHover={{ scale: 1.05 }}
-      aria-label={label}
+      aria-label={ariaLabel}
     >
-      <Icon className="h-10 w-10" strokeWidth={2.5} />
+      <Icon className="h-8 w-8" strokeWidth={2.5} />
+      <span className="text-xs font-bold uppercase tracking-wide">{label}</span>
 
       {/* Processing indicator ring */}
       {isProcessing && (

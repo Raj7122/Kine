@@ -69,6 +69,9 @@ export const AVATAR_FALLBACK_URL = "/assets/video/fallback.mp4";
 export const MODE_TOGGLE_SIZE = "h-20 w-20"; // Thumb zone button size
 export const TRANSITION_DURATION = 0.3; // seconds for view transitions
 
+// Dev mode flag — set NEXT_PUBLIC_DEV_MODE=true in .env.local to show debug/feedback UI
+export const IS_DEV = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
+
 // =============================================================================
 // LSTM Dynamic Gesture Recognition (Research-Grade CNN-LSTM Architecture)
 // =============================================================================

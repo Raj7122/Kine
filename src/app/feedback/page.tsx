@@ -4,12 +4,26 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/useAppStore';
 import { FeedbackButtons, MetricsDashboard } from '@/components/feedback';
+import { IS_DEV } from '@/config/constants';
 import type { SignRecognizeResult } from '@/lib/sign-recognition/types';
 
 export default function FeedbackTestPage() {
   const { sessionId } = useAppStore();
   const [translationText, setTranslationText] = useState('HELLO');
   const [dashboardKey, setDashboardKey] = useState(0);
+
+  if (!IS_DEV) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-black text-white">
+        <div className="text-center">
+          <p className="text-lg text-gray-400">This page is only available in development mode.</p>
+          <Link href="/" className="mt-4 inline-block text-sm font-medium text-yellow-400 hover:text-yellow-300">
+            Back to app
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   const recognition: SignRecognizeResult = {
     text: translationText,

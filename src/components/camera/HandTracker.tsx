@@ -180,6 +180,12 @@ export function HandTracker({
       if (now - lastDetectionTimeRef.current >= LANDMARK_SAMPLING_RATE) {
         lastDetectionTimeRef.current = now;
 
+        // Skip detection if video has no valid dimensions (camera paused/stopping)
+        if (!videoElement.videoWidth || !videoElement.videoHeight) {
+          animationFrameRef.current = requestAnimationFrame(detect);
+          return;
+        }
+
         // Ensure canvas matches video dimensions
         if (
           canvas.width !== videoElement.videoWidth ||

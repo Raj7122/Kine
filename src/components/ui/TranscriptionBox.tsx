@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
 import { FeedbackButtons } from '@/components/feedback';
+import { IS_DEV } from '@/config/constants';
 import type { TranslationState } from '@/hooks/useSigningModeTranslation';
 
 interface TranscriptionBoxProps {
@@ -50,7 +51,7 @@ export function TranscriptionBox({
 
   const showSpinner = translationState === 'processing' || isProcessing;
 
-  const showFeedback = Boolean(
+  const showFeedback = IS_DEV && Boolean(
     lastTranslation &&
       translationId &&
       dismissedTranslationId !== translationId &&

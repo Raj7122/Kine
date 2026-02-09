@@ -6,13 +6,14 @@ import { Camera, AlertCircle, Loader2 } from 'lucide-react';
 
 interface CameraFeedProps {
   className?: string;
+  enabled?: boolean;
   onVideoReady?: (video: HTMLVideoElement) => void;
   onError?: (error: string) => void;
 }
 
 export const CameraFeed = forwardRef<HTMLVideoElement, CameraFeedProps>(
-  function CameraFeed({ className = '', onVideoReady, onError }, ref) {
-    const { videoRef, isLoading, isReady, error, startCamera } = useCamera({
+  function CameraFeed({ className = '', enabled = true, onVideoReady, onError }, ref) {
+    const { videoRef, isLoading, isReady, error, startCamera, stopCamera } = useCamera({
       facingMode: 'user',
       width: 1280,
       height: 720,
@@ -20,8 +21,17 @@ export const CameraFeed = forwardRef<HTMLVideoElement, CameraFeedProps>(
 
     // Start camera on mount
     useEffect(() => {
-      startCamera();
-    }, [startCamera]);
+      if (enabled) {
+        startCamera();
+      }
+    }, [enabled, startCamera]);
+
+    // Stop camera when disabled
+    useEffect(() => {
+      if (!enabled) {
+        stopCamera();
+      }
+    }, [enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Notify parent when video is ready
     useEffect(() => {
