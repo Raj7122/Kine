@@ -9,6 +9,41 @@
 
 'use client';
 
+// Persistent Audio element for iOS Safari compatibility.
+// iOS requires audio.play() to originate from a user gesture. By creating
+// a single Audio element and "unlocking" it on the first tap, we can reuse
+// it for all subsequent programmatic playback.
+let sharedAudio: HTMLAudioElement | null = null;
+let audioUnlocked = false;
+
+function getSharedAudio(): HTMLAudioElement {
+  if (!sharedAudio) {
+    sharedAudio = new Audio();
+  }
+  return sharedAudio;
+}
+
+/**
+ * Call this once on the first user interaction (tap/click) to unlock
+ * audio playback on iOS Safari. Safe to call multiple times — only
+ * runs once.
+ */
+export function unlockAudioPlayback(): void {
+  if (audioUnlocked) return;
+  const audio = getSharedAudio();
+  // Play a silent frame to unlock the audio element
+  audio.src = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwMHAAAAAAD/+1DEAAAF8ANX9AAAIAAADSAAAAQAAAAAAAAANIAAAAAAABOQ+f4IAYBwHwfB8HygIAmD/BB//BAEwfB8HwfKAgCYPg+D4Pg+UBAEASB8HwfB8oCAJg+D4Pg+D5QEAQBMH/B8HwfKAgCYPg+D4Pg+UBAEwfB8HwfB8oCAP/7UMQOgAAAADSAAAAAIAAANIAAAAQAAAAAAAAA';
+  audio.volume = 0.01;
+  audio.play().then(() => {
+    audio.pause();
+    audio.volume = 1;
+    audioUnlocked = true;
+    console.log('[Audio] iOS audio unlocked');
+  }).catch(() => {
+    // Silently fail — will retry on next interaction
+  });
+}
+
 export interface SynthesizeSpeechOptions {
   voiceId?: string;
   modelId?: string;
@@ -114,23 +149,30 @@ export async function synthesizeSpeech(
 }
 
 /**
- * Play audio from a blob
+ * Play audio from a blob using the shared Audio element (iOS compatible)
  *
  * @param audioBlob - The audio blob to play
  * @returns Promise that resolves when audio finishes playing
  */
 export function playAudioBlob(audioBlob: Blob): Promise<void> {
   return new Promise((resolve, reject) => {
-    const audio = new Audio();
-    audio.src = URL.createObjectURL(audioBlob);
+    const audio = getSharedAudio();
+    const url = URL.createObjectURL(audioBlob);
+
+    // Clean up previous src if any
+    if (audio.src && audio.src.startsWith('blob:')) {
+      URL.revokeObjectURL(audio.src);
+    }
+
+    audio.src = url;
 
     audio.onended = () => {
-      URL.revokeObjectURL(audio.src);
+      URL.revokeObjectURL(url);
       resolve();
     };
 
-    audio.onerror = (e) => {
-      URL.revokeObjectURL(audio.src);
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
       reject(new Error('Failed to play audio'));
     };
 

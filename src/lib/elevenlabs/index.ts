@@ -16,6 +16,7 @@ export {
   speakText,
   playAudioBlob,
   checkSpeechConfigured,
+  unlockAudioPlayback,
   type SynthesizeSpeechOptions,
   type SpeechSynthesisResult,
 } from './clientService';

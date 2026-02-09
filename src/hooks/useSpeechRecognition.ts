@@ -117,27 +117,24 @@ export function useSpeechRecognition(
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let interim = '';
-      let final = '';
+      // Rebuild full transcript from ALL results to avoid duplication
+      let finalParts = '';
+      let interimParts = '';
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         const transcript = event.results[i][0].transcript;
         if (event.results[i].isFinal) {
-          final += transcript;
+          finalParts += transcript;
         } else {
-          interim += transcript;
+          interimParts += transcript;
         }
       }
 
-      if (interim) {
-        setInterimTranscript(interim);
-      }
+      setInterimTranscript(interimParts);
+      setFinalTranscript(finalParts);
 
-      if (final) {
-        setFinalTranscript((prev) => prev + final);
-        setInterimTranscript('');
-
-        // Reset silence timeout when we get final text
+      // When we get new final text, reset the silence timer
+      if (finalParts) {
         if (silenceTimeoutRef.current) {
           clearTimeout(silenceTimeoutRef.current);
         }
@@ -145,7 +142,7 @@ export function useSpeechRecognition(
         // Auto-translate after 2 seconds of silence
         silenceTimeoutRef.current = setTimeout(() => {
           console.log('[Speech] Silence detected, triggering translation');
-          triggerTranslation(finalTranscript + final);
+          triggerTranslation(finalParts);
         }, 2000);
       }
     };

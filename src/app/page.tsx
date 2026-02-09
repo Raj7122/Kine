@@ -19,6 +19,7 @@ import { useSigningModeTranslation, type TranslationState } from '@/hooks/useSig
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { Play, Square, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 import { useUserStore } from '@/store/useUserStore';
+import { unlockAudioPlayback } from '@/lib/elevenlabs';
 
 const TEXT_SIZE_CLASS = {
   small: 'text-xl sm:text-2xl',
@@ -50,7 +51,7 @@ export default function Home() {
   }, [profile.role, setMode]);
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-black">
+    <div className="relative h-screen w-screen overflow-hidden bg-black" onClick={unlockAudioPlayback} onTouchStart={unlockAudioPlayback}>
       <AnimatePresence mode="wait">
         {mode === 'SIGNING' ? (
           <SigningView
@@ -287,7 +288,7 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
         )}
 
         {/* Transcription Box - positioned above bottom bar */}
-        <div className="mb-[20vh] flex justify-center px-2">
+        <div className="mb-[25vh] flex justify-center px-2">
           <TranscriptionBox
             translationState={translationState}
             translationError={translationError}
