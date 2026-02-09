@@ -366,3 +366,40 @@
 - **Tests**: 14 files, 267 tests passing (0 failing).
 - **Files Created**: `src/lib/sign-recognition/geminiClient.ts`, `src/lib/sign-recognition/geminiClient.test.ts`
 - **Files Modified**: `src/hooks/useSigningModeTranslation.ts`
+
+---
+
+## 2026-02-09 — Feature: Confusion-Pair Prompt Augmentation Overhaul
+
+- **Goal**: Replace the directive-style prompt augmentation ("strongly consider X instead") with an accuracy-weighted confusion-pair system that uses sign definitions and context dependency, eliminating three structural flaws: no positive signal, conflicting corrections, and chain poisoning.
+- **Problem**: The old augmentation injected directives like `When you would output "YES", strongly consider "WANT" instead`, which caused Gemini to avoid "YES" entirely — even when correct 94% of the time. Conflicting corrections ("YES" → both "WANT" and "HELP-ME") and chain corrections ("A" → "GOODBYE" → "NEED") made the problem worse.
+- **Solution — Accuracy-Gated Confusion Pairs**:
+  - **New `sign_accuracy` table**: Tracks per-sign positive/negative feedback counts from user 👍/👎.
+  - **Accuracy gate**: Only inject a correction when sign accuracy < 70% (with minimum 5 total ratings).
+  - **Confusion-pair format**: Instead of "don't output X", describes pairs like: `"YES" and "WANT" are frequently confused (accuracy: 55%). Distinguish by: YES = S-hand nodding; WANT = Claw hands pull toward body.`
+  - **Context-dependent signs**: If a sign has 3+ distinct corrections with no dominant one (>60%), emits a special format listing all possibilities with context rules extracted from sign definitions.
+  - **Chain suppression**: Detects A→B + B→C chains and suppresses the weaker link.
+  - **Sign definition parser**: Extracts handshape/motion descriptions from `ASL_INTERPRETATION_PROMPT` for disambiguation hints.
+- **Schema Changes** (`supabase/migrations/006_accuracy_tracking.sql`):
+  - Created `sign_accuracy` table (sign_text PK, total_positive, total_negative, last_updated_at).
+  - Updated `update_learned_corrections()` trigger to track both positive and negative feedback in `sign_accuracy`.
+  - Backfill query seeds `sign_accuracy` from existing `translation_feedback` data.
+- **Runtime Corrections** (`learnedCorrections.ts`):
+  - Added accuracy gate: skips auto-correction for signs with >= 70% accuracy.
+  - Added context-dependency skip: if 3+ corrections with no dominant winner, defers to Gemini via augmented prompt.
+  - Fetches `sign_accuracy` data alongside `learned_corrections` for both prompt augmentation and runtime corrections.
+- **Constants** (configurable):
+  - `ACCURACY_THRESHOLD`: 0.70
+  - `MIN_FEEDBACK_COUNT`: 5
+  - `CONTEXT_DEP_MIN_CORRECTIONS`: 3
+  - `DOMINANT_CORRECTION_RATIO`: 0.60
+- **Tests**: 25 tests passing across `promptAugmentation.test.ts` (10) and `learnedCorrections.test.ts` (15). TypeScript clean (`tsc --noEmit`).
+- **Files Created**: `supabase/migrations/006_accuracy_tracking.sql`, `src/lib/sign-recognition/signDefinitions.ts`
+- **Files Modified**: `src/lib/sign-recognition/promptAugmentation.ts`, `src/lib/sign-recognition/learnedCorrections.ts`, `src/lib/sign-recognition/promptAugmentation.test.ts`, `src/lib/sign-recognition/learnedCorrections.test.ts`
+
+---
+
+## Future Work
+
+- **Decay/recency weighting**: Older corrections should carry less weight than recent ones. Proposed approach: `effectiveCount = occurrenceCount * decayFactor` where `decayFactor = max(0.1, 1 - daysSinceLastSeen / 90)`. Deferred to a later date.
+- **`sign_recognition_samples` as reference data**: Raw landmark/video samples linked to feedback (`sign_recognition_samples` + `translation_feedback`) could be analyzed offline to discover distinguishing motion/handshape patterns between confused signs, then encoded as text descriptions in the confusion-pair augmentation. This is a lightweight alternative to full CNN-LSTM retraining. Deferred to Phase 2 iteration.

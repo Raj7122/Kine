@@ -1,4 +1,11 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
+import {
+  ACCURACY_THRESHOLD,
+  MIN_FEEDBACK_COUNT,
+  CONTEXT_DEP_MIN_CORRECTIONS,
+  DOMINANT_CORRECTION_RATIO,
+  type SignAccuracyRecord,
+} from './promptAugmentation';
 
 export interface LearnedCorrection {
   geminiMisrecognition: string;
@@ -18,6 +25,8 @@ const CACHE_TTL_MS = 10_000;
 
 let cachedAt = 0;
 let cachedMap: Map<string, LearnedCorrection> | null = null;
+let cachedAccuracyAt = 0;
+let cachedAccuracyMap: Map<string, SignAccuracyRecord> | null = null;
 
 export function normalizeLearnedCorrectionKey(text: string): string {
   return text
@@ -27,7 +36,10 @@ export function normalizeLearnedCorrectionKey(text: string): string {
     .toUpperCase();
 }
 
-export function buildRuntimeCorrectionMap(rows: LearnedCorrection[]): Map<string, LearnedCorrection> {
+export function buildRuntimeCorrectionMap(
+  rows: LearnedCorrection[],
+  accuracyMap?: Map<string, SignAccuracyRecord>,
+): Map<string, LearnedCorrection> {
   const grouped = new Map<string, LearnedCorrection[]>();
 
   for (const row of rows) {
@@ -48,6 +60,20 @@ export function buildRuntimeCorrectionMap(rows: LearnedCorrection[]): Map<string
 
   const map = new Map<string, LearnedCorrection>();
   for (const [key, candidates] of grouped.entries()) {
+    // Accuracy gate: skip if sign accuracy is above threshold
+    if (accuracyMap) {
+      const record = accuracyMap.get(key);
+      if (record) {
+        const total = record.totalPositive + record.totalNegative;
+        if (total >= MIN_FEEDBACK_COUNT) {
+          const accuracy = record.totalPositive / total;
+          if (accuracy >= ACCURACY_THRESHOLD) {
+            continue;
+          }
+        }
+      }
+    }
+
     const byCorrect = new Map<string, LearnedCorrection>();
 
     for (const candidate of candidates) {
@@ -62,6 +88,20 @@ export function buildRuntimeCorrectionMap(rows: LearnedCorrection[]): Map<string
 
     if (byCorrect.size === 0) {
       continue;
+    }
+
+    // Context-dependency skip: if 3+ corrections with no dominant winner,
+    // don't auto-correct — let Gemini handle it via the augmented prompt.
+    if (byCorrect.size >= CONTEXT_DEP_MIN_CORRECTIONS) {
+      const sorted = [...byCorrect.values()].sort(
+        (a, b) => b.occurrenceCount - a.occurrenceCount
+      );
+      const totalCount = sorted.reduce((sum, c) => sum + c.occurrenceCount, 0);
+      const topRatio = sorted[0].occurrenceCount / totalCount;
+      if (topRatio <= DOMINANT_CORRECTION_RATIO) {
+        console.log(`[SignRecognize] Skipped context-dependent sign: "${key}" (${byCorrect.size} corrections, no dominant)`);
+        continue;
+      }
     }
 
     // Pick the correction with the highest occurrence count.
@@ -114,15 +154,53 @@ export function buildRuntimeCorrectionMap(rows: LearnedCorrection[]): Map<string
   return map;
 }
 
-async function fetchRuntimeCorrectionsMap(now: number): Promise<Map<string, LearnedCorrection>> {
+async function fetchSignAccuracyForRuntime(now: number): Promise<Map<string, SignAccuracyRecord>> {
   if (!isSupabaseConfigured || !supabase) return new Map();
 
   const { data, error } = await supabase
-    .from('learned_corrections')
-    .select('gemini_misrecognition, correct_sign, occurrence_count')
-    .gte('occurrence_count', RUNTIME_MIN_OCCURRENCES)
-    .order('occurrence_count', { ascending: false })
+    .from('sign_accuracy')
+    .select('sign_text, total_positive, total_negative')
+    .order('last_updated_at', { ascending: false })
     .limit(200);
+
+  if (error) {
+    console.warn('[SignRecognize] Failed to fetch sign_accuracy for runtime:', error.message);
+    return new Map();
+  }
+
+  const map = new Map<string, SignAccuracyRecord>();
+  for (const row of data ?? []) {
+    map.set(row.sign_text.toUpperCase(), {
+      signText: row.sign_text,
+      totalPositive: row.total_positive,
+      totalNegative: row.total_negative,
+    });
+  }
+
+  cachedAccuracyAt = now;
+  cachedAccuracyMap = map;
+  return map;
+}
+
+async function getSignAccuracyForRuntime(now: number): Promise<Map<string, SignAccuracyRecord>> {
+  if (cachedAccuracyMap && now - cachedAccuracyAt < CACHE_TTL_MS) return cachedAccuracyMap;
+  return fetchSignAccuracyForRuntime(now);
+}
+
+async function fetchRuntimeCorrectionsMap(now: number): Promise<Map<string, LearnedCorrection>> {
+  if (!isSupabaseConfigured || !supabase) return new Map();
+
+  const [correctionsResult, accuracyMap] = await Promise.all([
+    supabase
+      .from('learned_corrections')
+      .select('gemini_misrecognition, correct_sign, occurrence_count')
+      .gte('occurrence_count', RUNTIME_MIN_OCCURRENCES)
+      .order('occurrence_count', { ascending: false })
+      .limit(200),
+    getSignAccuracyForRuntime(now),
+  ]);
+
+  const { data, error } = correctionsResult;
 
   if (error) {
     console.warn('[SignRecognize] Failed to fetch learned_corrections for runtime apply:', error.message);
@@ -143,7 +221,7 @@ async function fetchRuntimeCorrectionsMap(now: number): Promise<Map<string, Lear
   }
 
   cachedAt = now;
-  cachedMap = buildRuntimeCorrectionMap(rows);
+  cachedMap = buildRuntimeCorrectionMap(rows, accuracyMap);
   return cachedMap;
 }
 
@@ -182,4 +260,6 @@ export async function applyRuntimeLearnedCorrections(originalText: string): Prom
 export function clearRuntimeCorrectionsCacheForTests() {
   cachedAt = 0;
   cachedMap = null;
+  cachedAccuracyAt = 0;
+  cachedAccuracyMap = null;
 }

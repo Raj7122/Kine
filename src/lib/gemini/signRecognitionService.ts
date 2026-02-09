@@ -103,10 +103,10 @@ Common ASL handshapes to recognize:
 - **NO**: Index and middle fingers snap to thumb
 - **PLEASE**: Flat hand circles on chest
 - **SORRY**: A-hand circles on chest
-- **HELP**: Thumbs-up on flat palm, lift up
+- **HELP-ME**: Holding one hand up with the palm toward another person, tucking the thumb into the palm, and closing the four fingers over the thumb into a fist.
 - **I-LOVE-YOU**: Pinky, index, and thumb extended (I+L+Y combined)
 - **UNDERSTAND**: Index flicks up near forehead
-- **GOOD**: Flat hand from chin to palm
+- **GOOD**: Flat hand from chin moving it straight down and slightly forward.
 - **BAD**: Flat hand from chin, flip down
 - **WANT**: Claw hands pull toward body
 - **NEED**: X-hand bends down repeatedly

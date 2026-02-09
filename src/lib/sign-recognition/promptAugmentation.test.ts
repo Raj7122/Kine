@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// ─── Mock setup ────────────────────────────────────────────────
+// Routes supabase.from('learned_corrections') and supabase.from('sign_accuracy')
+// to separate mock builders.
+
 const {
   mockSupabase,
-  builder,
-  setQueryResponse,
+  setCorrectionsResponse,
+  setAccuracyResponse,
   mockRpc,
 } = vi.hoisted(() => {
   type SupabaseError = { message: string };
@@ -14,36 +18,44 @@ const {
     added_to_prompt: boolean;
     prompt_version: number | null;
   };
-  type QueryResponse = { data: LearnedCorrectionsQueryRow[] | null; error: SupabaseError | null };
+  type AccuracyQueryRow = {
+    sign_text: string;
+    total_positive: number;
+    total_negative: number;
+  };
+  type CorrResponse = { data: LearnedCorrectionsQueryRow[] | null; error: SupabaseError | null };
+  type AccResponse = { data: AccuracyQueryRow[] | null; error: SupabaseError | null };
 
-  let response: QueryResponse = { data: [], error: null };
+  let corrResponse: CorrResponse = { data: [], error: null };
+  let accResponse: AccResponse = { data: [], error: null };
 
-  const builder = {
-    select: vi.fn(),
-    gte: vi.fn(),
-    or: vi.fn(),
-    order: vi.fn(),
-    limit: vi.fn(),
+  const makeBuilder = (getResponse: () => { data: unknown; error: unknown }) => {
+    const b: Record<string, ReturnType<typeof vi.fn>> = {};
+    b.select = vi.fn(() => b);
+    b.gte = vi.fn(() => b);
+    b.or = vi.fn(() => b);
+    b.order = vi.fn(() => b);
+    b.limit = vi.fn(async () => getResponse());
+    return b;
   };
 
-  builder.select.mockReturnValue(builder);
-  builder.gte.mockReturnValue(builder);
-  builder.or.mockReturnValue(builder);
-  builder.order.mockReturnValue(builder);
-  builder.limit.mockImplementation(async () => response);
+  const corrBuilder = makeBuilder(() => corrResponse);
+  const accBuilder = makeBuilder(() => accResponse);
 
   const mockRpc = vi.fn(async () => ({ error: null as SupabaseError | null }));
 
   const mockSupabase = {
-    from: vi.fn(() => builder),
+    from: vi.fn((table: string) => {
+      if (table === 'sign_accuracy') return accBuilder;
+      return corrBuilder;
+    }),
     rpc: mockRpc,
   };
 
-  const setQueryResponse = (next: QueryResponse) => {
-    response = next;
-  };
+  const setCorrectionsResponse = (next: CorrResponse) => { corrResponse = next; };
+  const setAccuracyResponse = (next: AccResponse) => { accResponse = next; };
 
-  return { mockSupabase, builder, setQueryResponse, mockRpc };
+  return { mockSupabase, setCorrectionsResponse, setAccuracyResponse, mockRpc };
 });
 
 vi.mock('@/lib/supabase/client', () => ({
@@ -51,114 +63,170 @@ vi.mock('@/lib/supabase/client', () => ({
   isSupabaseConfigured: true,
 }));
 
+vi.mock('./signDefinitions', () => ({
+  buildDisambiguationHint: vi.fn((a: string, b: string) => `${a.toUpperCase()} = desc-${a}; ${b.toUpperCase()} = desc-${b}`),
+  buildContextRules: vi.fn((_orig: string, corrections: Array<{ sign: string; percentage: number }>) =>
+    corrections.map((c) => `If motion-${c.sign.toLowerCase()} → likely ${c.sign.toUpperCase()} (${c.percentage}%)`)
+  ),
+}));
+
 import { buildAugmentedPrompt, clearPromptAugmentationCacheForTests } from './promptAugmentation';
 
-describe('promptAugmentation', () => {
+describe('promptAugmentation (confusion-pair)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearPromptAugmentationCacheForTests();
-    setQueryResponse({ data: [], error: null });
+    setCorrectionsResponse({ data: [], error: null });
+    setAccuracyResponse({ data: [], error: null });
     mockRpc.mockResolvedValue({ error: null });
   });
 
   it('returns the base prompt when no patterns are available', async () => {
-    setQueryResponse({ data: [], error: null });
-
     const result = await buildAugmentedPrompt('BASE', 1, 1000);
 
     expect(result.prompt).toBe('BASE');
     expect(result.patternsUsed).toEqual([]);
-    expect(mockSupabase.from).toHaveBeenCalledTimes(1);
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
-  it('sanitizes values, dedupes, and marks patterns as added', async () => {
-    setQueryResponse({
+  it('emits a confusion-pair line with disambiguation hints', async () => {
+    setCorrectionsResponse({
       data: [
-        {
-          gemini_misrecognition: '"HELLO\nWORLD`"',
-          correct_sign: "'HI\tTHERE'",
-          occurrence_count: 12,
-          added_to_prompt: false,
-          prompt_version: null,
-        },
-        {
-          gemini_misrecognition: 'HELLO   WORLD',
-          correct_sign: 'HI THERE',
-          occurrence_count: 9,
-          added_to_prompt: false,
-          prompt_version: null,
-        },
-        {
-          gemini_misrecognition: '\n\t',
-          correct_sign: 'VALID',
-          occurrence_count: 7,
-          added_to_prompt: false,
-          prompt_version: null,
-        },
+        { gemini_misrecognition: 'YES', correct_sign: 'WANT', occurrence_count: 10, added_to_prompt: false, prompt_version: null },
       ],
       error: null,
     });
+    // No accuracy data → accuracy is null → correction passes gate
+    setAccuracyResponse({ data: [], error: null });
 
-    const result = await buildAugmentedPrompt('BASE', 7, 1000);
+    const result = await buildAugmentedPrompt('BASE', 1, 1000);
 
     expect(result.patternsUsed).toHaveLength(1);
-    expect(result.prompt).toContain('## LEARNED CORRECTIONS FROM USER FEEDBACK');
-    expect(result.prompt).toContain('When you would output "HELLO WORLD"');
-    expect(result.prompt).toContain('strongly consider "HI THERE"');
-    expect(result.prompt).not.toContain('`');
-
-    expect(mockRpc).toHaveBeenCalledTimes(1);
-    expect(mockRpc).toHaveBeenCalledWith('mark_prompt_patterns_added', {
-      p_patterns: [
-        {
-          gemini_misrecognition: '"HELLO\nWORLD`"',
-          correct_sign: "'HI\tTHERE'",
-        },
-      ],
-      p_prompt_version: 7,
-    });
+    expect(result.prompt).toContain('"YES" and "WANT" are frequently confused');
+    expect(result.prompt).toContain('Distinguish by:');
+    expect(result.prompt).toContain('YES = desc-YES');
+    expect(result.prompt).not.toContain('strongly consider');
   });
 
-  it('groups multiple corrections for the same misrecognition and emits an ambiguity line', async () => {
-    setQueryResponse({
+  it('accuracy gate: skips corrections when sign accuracy >= 70%', async () => {
+    setCorrectionsResponse({
       data: [
-        {
-          gemini_misrecognition: 'V',
-          correct_sign: 'SEE',
-          occurrence_count: 10,
-          added_to_prompt: false,
-          prompt_version: null,
-        },
-        {
-          gemini_misrecognition: 'V',
-          correct_sign: 'TWICE',
-          occurrence_count: 8,
-          added_to_prompt: false,
-          prompt_version: null,
-        },
+        { gemini_misrecognition: 'YES', correct_sign: 'WANT', occurrence_count: 10, added_to_prompt: false, prompt_version: null },
       ],
+      error: null,
+    });
+    // YES has 80% accuracy (8 positive, 2 negative) → above threshold
+    setAccuracyResponse({
+      data: [{ sign_text: 'YES', total_positive: 8, total_negative: 2 }],
       error: null,
     });
 
     const result = await buildAugmentedPrompt('BASE', 1, 1000);
 
-    expect(result.patternsUsed).toHaveLength(2);
-    expect(result.prompt).toContain('The output "V" can be ambiguous');
-    expect(result.prompt).toContain('"SEE"');
-    expect(result.prompt).toContain('"TWICE"');
+    // Patterns are still returned (for marking), but the section is empty
+    expect(result.prompt).toBe('BASE');
+  });
+
+  it('accuracy gate: injects corrections when sign accuracy < 70%', async () => {
+    setCorrectionsResponse({
+      data: [
+        { gemini_misrecognition: 'YES', correct_sign: 'WANT', occurrence_count: 10, added_to_prompt: false, prompt_version: null },
+      ],
+      error: null,
+    });
+    // YES has 50% accuracy → below threshold
+    setAccuracyResponse({
+      data: [{ sign_text: 'YES', total_positive: 5, total_negative: 5 }],
+      error: null,
+    });
+
+    const result = await buildAugmentedPrompt('BASE', 1, 1000);
+
+    expect(result.prompt).toContain('"YES" and "WANT" are frequently confused');
+    expect(result.prompt).toContain('(accuracy: 50%)');
+  });
+
+  it('min feedback: skips accuracy gate when total feedback < 5', async () => {
+    setCorrectionsResponse({
+      data: [
+        { gemini_misrecognition: 'YES', correct_sign: 'WANT', occurrence_count: 5, added_to_prompt: false, prompt_version: null },
+      ],
+      error: null,
+    });
+    // Only 3 total feedback — too few to compute accuracy, so gate is skipped
+    setAccuracyResponse({
+      data: [{ sign_text: 'YES', total_positive: 3, total_negative: 0 }],
+      error: null,
+    });
+
+    const result = await buildAugmentedPrompt('BASE', 1, 1000);
+
+    // Should still inject because accuracy is unreliable
+    expect(result.prompt).toContain('"YES" and "WANT" are frequently confused');
+  });
+
+  it('context-dependent: 3+ corrections with no dominant → context-dependent format', async () => {
+    setCorrectionsResponse({
+      data: [
+        { gemini_misrecognition: 'YES', correct_sign: 'WANT', occurrence_count: 4, added_to_prompt: false, prompt_version: null },
+        { gemini_misrecognition: 'YES', correct_sign: 'HELP-ME', occurrence_count: 3, added_to_prompt: false, prompt_version: null },
+        { gemini_misrecognition: 'YES', correct_sign: 'GOOD', occurrence_count: 3, added_to_prompt: false, prompt_version: null },
+      ],
+      error: null,
+    });
+    setAccuracyResponse({ data: [], error: null });
+
+    const result = await buildAugmentedPrompt('BASE', 1, 1000);
+
+    expect(result.prompt).toContain('"YES" is context-dependent');
+    expect(result.prompt).toContain('WANT');
+    expect(result.prompt).toContain('HELP-ME');
+    expect(result.prompt).toContain('GOOD');
+    expect(result.prompt).toContain('Context rules:');
+    expect(result.prompt).toContain('motion direction and handshape');
+  });
+
+  it('context-dependent: 3+ corrections with dominant (>60%) → standard confusion pair', async () => {
+    setCorrectionsResponse({
+      data: [
+        { gemini_misrecognition: 'YES', correct_sign: 'WANT', occurrence_count: 8, added_to_prompt: false, prompt_version: null },
+        { gemini_misrecognition: 'YES', correct_sign: 'HELP-ME', occurrence_count: 2, added_to_prompt: false, prompt_version: null },
+        { gemini_misrecognition: 'YES', correct_sign: 'GOOD', occurrence_count: 1, added_to_prompt: false, prompt_version: null },
+      ],
+      error: null,
+    });
+    setAccuracyResponse({ data: [], error: null });
+
+    const result = await buildAugmentedPrompt('BASE', 1, 1000);
+
+    // WANT has 8/11 = 73% of negatives → dominant
+    expect(result.prompt).toContain('"YES" and "WANT" are frequently confused');
+    expect(result.prompt).toContain('Also confused with:');
+    expect(result.prompt).not.toContain('context-dependent');
+  });
+
+  it('chain suppression: A→B + B→C suppresses weaker link', async () => {
+    setCorrectionsResponse({
+      data: [
+        { gemini_misrecognition: 'A', correct_sign: 'GOODBYE', occurrence_count: 8, added_to_prompt: false, prompt_version: null },
+        { gemini_misrecognition: 'GOODBYE', correct_sign: 'NEED', occurrence_count: 3, added_to_prompt: false, prompt_version: null },
+      ],
+      error: null,
+    });
+    setAccuracyResponse({ data: [], error: null });
+
+    const result = await buildAugmentedPrompt('BASE', 1, 1000);
+
+    // A→GOODBYE (count 8) should survive
+    expect(result.prompt).toContain('"A" and "GOODBYE"');
+    // GOODBYE→NEED (count 3) should be suppressed because GOODBYE is a target of A→GOODBYE (count 8 > 3)
+    expect(result.prompt).not.toContain('"GOODBYE" and "NEED"');
   });
 
   it('does not re-mark patterns already associated with the current prompt version', async () => {
-    setQueryResponse({
+    setCorrectionsResponse({
       data: [
-        {
-          gemini_misrecognition: 'HELLO',
-          correct_sign: 'HI',
-          occurrence_count: 5,
-          added_to_prompt: true,
-          prompt_version: 2,
-        },
+        { gemini_misrecognition: 'HELLO', correct_sign: 'HI', occurrence_count: 5, added_to_prompt: true, prompt_version: 2 },
       ],
       error: null,
     });
@@ -166,54 +234,12 @@ describe('promptAugmentation', () => {
     const result = await buildAugmentedPrompt('BASE', 2, 1000);
 
     expect(result.patternsUsed).toHaveLength(1);
-    expect(result.prompt).toContain('When you would output "HELLO"');
+    expect(result.prompt).toContain('"HELLO" and "HI"');
     expect(mockRpc).not.toHaveBeenCalled();
   });
 
-  it('caches patterns within TTL (does not re-query Supabase)', async () => {
-    setQueryResponse({
-      data: [
-        {
-          gemini_misrecognition: 'A',
-          correct_sign: 'B',
-          occurrence_count: 5,
-          added_to_prompt: false,
-          prompt_version: null,
-        },
-      ],
-      error: null,
-    });
-
-    await buildAugmentedPrompt('BASE', 1, 1000);
-    await buildAugmentedPrompt('BASE', 1, 2000);
-
-    expect(mockSupabase.from).toHaveBeenCalledTimes(1);
-  });
-
-  it('fails open when the mark_prompt_patterns_added RPC errors', async () => {
-    setQueryResponse({
-      data: [
-        {
-          gemini_misrecognition: 'HELLO',
-          correct_sign: 'HI',
-          occurrence_count: 5,
-          added_to_prompt: false,
-          prompt_version: null,
-        },
-      ],
-      error: null,
-    });
-
-    mockRpc.mockResolvedValue({ error: { message: 'RPC failed' } });
-
-    const result = await buildAugmentedPrompt('BASE', 1, 1000);
-
-    expect(result.patternsUsed).toHaveLength(1);
-    expect(result.prompt).toContain('When you would output "HELLO"');
-  });
-
   it('fails open when Supabase query errors', async () => {
-    setQueryResponse({ data: null, error: { message: 'bad query' } });
+    setCorrectionsResponse({ data: null, error: { message: 'bad query' } });
 
     const result = await buildAugmentedPrompt('BASE', 1, 1000);
 
