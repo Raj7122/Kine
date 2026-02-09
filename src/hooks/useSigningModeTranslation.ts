@@ -21,7 +21,9 @@ import {
   DYNAMIC_MODE_BUFFER_THRESHOLD,
   MAX_BUFFER_SIZE,
   LSTM_CONFIDENCE_THRESHOLD,
+  ELEVENLABS_VOICE_MAP,
 } from '@/config/constants';
+import { useUserStore } from '@/store/useUserStore';
 import { useLSTMDetection, type UseLSTMDetectionReturn } from './useLSTMDetection';
 import type { LSTMPrediction } from '@/lib/lstm';
 
@@ -297,10 +299,17 @@ export function useSigningModeTranslation(
       // Skip audio for empty or unclear responses
       const isValidRecognition = recognizedText && recognizedText.trim().length > 0;
 
-      if (isValidRecognition) {
+      // Skip TTS for hearing users (they don't need audio output of sign recognition)
+      const userRole = useUserStore.getState().profile.role;
+      const shouldPlayAudio = userRole !== 'hearing';
+
+      if (isValidRecognition && shouldPlayAudio) {
         console.log('[SigningModeTranslation] Step 1.5: ElevenLabs Audio Synthesis');
         try {
-          const audioResult = await synthesizeSpeech(recognizedText);
+          const voiceEntry = ELEVENLABS_VOICE_MAP[useUserStore.getState().preferences.voiceId];
+          const audioResult = await synthesizeSpeech(recognizedText, {
+            voiceId: voiceEntry?.id,
+          });
           if (audioResult.success && audioResult.audioBlob) {
             console.log('[SigningModeTranslation] Playing synthesized audio');
             await playAudioBlob(audioResult.audioBlob);
@@ -311,6 +320,8 @@ export function useSigningModeTranslation(
         } catch (audioError) {
           console.error('[SigningModeTranslation] Audio error:', audioError);
         }
+      } else if (!shouldPlayAudio) {
+        console.log('[SigningModeTranslation] Skipping audio for hearing user');
       } else {
         console.log('[SigningModeTranslation] Skipping audio for unclear recognition:', recognizedText);
       }

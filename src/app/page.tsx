@@ -18,11 +18,36 @@ import type { LandmarkResult } from '@/lib/mediapipe';
 import { useSigningModeTranslation, type TranslationState } from '@/hooks/useSigningModeTranslation';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { Play, Square, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { useUserStore } from '@/store/useUserStore';
+
+const TEXT_SIZE_CLASS = {
+  small: 'text-xl sm:text-2xl',
+  medium: 'text-2xl sm:text-4xl',
+  large: 'text-3xl sm:text-5xl',
+} as const;
+
+const ROLE_DEFAULT_MODE: Record<string, 'SIGNING' | 'LISTENING'> = {
+  deaf: 'SIGNING',
+  hard_of_hearing: 'SIGNING',
+  hearing: 'LISTENING',
+  blind: 'LISTENING',
+};
 
 export default function Home() {
-  const { mode } = useAppStore();
+  const { mode, setMode } = useAppStore();
+  const { profile } = useUserStore();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
+  // Set initial mode based on user role (once on mount)
+  const hasSetInitialMode = useRef(false);
+  useEffect(() => {
+    if (!hasSetInitialMode.current) {
+      const defaultMode = ROLE_DEFAULT_MODE[profile.role] || 'SIGNING';
+      setMode(defaultMode);
+      hasSetInitialMode.current = true;
+    }
+  }, [profile.role, setMode]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-black">
@@ -275,6 +300,10 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
 }
 
 function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
+  const { preferences } = useUserStore();
+  const textSizeClass = TEXT_SIZE_CLASS[preferences.textSize] || TEXT_SIZE_CLASS.medium;
+  const hc = preferences.highContrast;
+  const accentColor = hc ? 'text-yellow-400' : 'text-gray-200';
   const [isTestMode, setIsTestMode] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [quickMode, setQuickModeState] = useState(isQuickMode());
@@ -431,7 +460,7 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
         {/* Transcription Area - Large Yellow Text */}
         <div className="w-full max-w-md text-left">
           <div className="flex items-start justify-between">
-            <h2 className="flex-1 text-2xl sm:text-4xl font-bold leading-tight text-yellow-400">
+            <h2 className={`flex-1 ${textSizeClass} font-bold leading-tight ${accentColor}`}>
               {displayText}
             </h2>
             {/* Mic indicator */}
@@ -446,7 +475,7 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
               {isListening ? <Mic className="h-6 w-6" /> : <MicOff className="h-6 w-6" />}
             </button>
           </div>
-          <p className="mt-2 text-lg text-yellow-400/70">
+          <p className={`mt-2 text-lg ${hc ? 'text-yellow-400/70' : 'text-gray-400'}`}>
             {subText}
           </p>
           {/* Show gloss sequence if available */}
@@ -465,9 +494,11 @@ function ListeningView({ onSettingsClick, onHistoryClick }: ViewProps) {
           )}
         </div>
 
-        {/* Avatar Display - Centered */}
+        {/* Avatar Display - Centered (hidden in text_only mode) */}
         <div className="mt-6 flex flex-1 flex-col items-center justify-center">
-          <AvatarPlayer className="h-48 w-48 sm:h-64 sm:w-64" />
+          {preferences.visualMode === 'text_plus_avatar' && (
+            <AvatarPlayer className="h-48 w-48 sm:h-64 sm:w-64" />
+          )}
           {/* Quick Mode Toggle - dev only */}
           {IS_DEV && (
             <button

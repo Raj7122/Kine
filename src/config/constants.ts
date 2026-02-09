@@ -72,6 +72,15 @@ export const TRANSITION_DURATION = 0.3; // seconds for view transitions
 // Dev mode flag — set NEXT_PUBLIC_DEV_MODE=true in .env.local to show debug/feedback UI
 export const IS_DEV = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
 
+// ElevenLabs voice ID mapping (free-tier default voices)
+export const ELEVENLABS_VOICE_MAP: Record<string, { id: string; name: string }> = {
+  default:  { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel' },
+  male_1:   { id: 'pNInz6obpgDQGcFmaJgB', name: 'Adam' },
+  male_2:   { id: 'VR6AewLTigWG4xSOukaG', name: 'Arnold' },
+  female_1: { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Bella' },
+  female_2: { id: 'MF3mGyEYCl7XYWbV9V6O', name: 'Elli' },
+};
+
 // =============================================================================
 // LSTM Dynamic Gesture Recognition (Research-Grade CNN-LSTM Architecture)
 // =============================================================================

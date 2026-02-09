@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Sun, Moon, Type, Volume2, User, Eye } from 'lucide-react';
 import { useUserStore } from '@/store/useUserStore';
+import { ELEVENLABS_VOICE_MAP } from '@/config/constants';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -166,15 +167,15 @@ function SettingsModalContent({ onClose }: { onClose: () => void }) {
                   highContrast: !localPrefs.highContrast,
                 })
               }
-              className={`relative h-7 w-12 rounded-full transition-colors ${
+              className={`relative inline-flex h-7 w-14 shrink-0 items-center rounded-full transition-colors ${
                 localPrefs.highContrast ? 'bg-yellow-400' : 'bg-gray-600'
               }`}
               role="switch"
               aria-checked={localPrefs.highContrast}
             >
               <span
-                className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-md transition-transform ${
-                  localPrefs.highContrast ? 'translate-x-6' : 'translate-x-1'
+                className={`inline-block h-5 w-5 rounded-full bg-white shadow-md transition-transform ${
+                  localPrefs.highContrast ? 'translate-x-8' : 'translate-x-1'
                 }`}
               />
             </button>
@@ -191,11 +192,11 @@ function SettingsModalContent({ onClose }: { onClose: () => void }) {
               onChange={(e) => setLocalPrefs({ ...localPrefs, voiceId: e.target.value })}
               className="w-full rounded-lg bg-gray-800 px-4 py-3 text-gray-200 outline-none focus:ring-2 focus:ring-yellow-400"
             >
-              <option value="default">Default (Rachel)</option>
-              <option value="male_1">Male Voice 1</option>
-              <option value="male_2">Male Voice 2</option>
-              <option value="female_1">Female Voice 1</option>
-              <option value="female_2">Female Voice 2</option>
+              {Object.entries(ELEVENLABS_VOICE_MAP).map(([key, voice]) => (
+                <option key={key} value={key}>
+                  {voice.name}{key === 'default' ? ' (Default)' : ''}
+                </option>
+              ))}
             </select>
           </div>
         </div>

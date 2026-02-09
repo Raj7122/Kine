@@ -3,9 +3,16 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
+import { useUserStore } from '@/store/useUserStore';
 import { FeedbackButtons } from '@/components/feedback';
 import { IS_DEV } from '@/config/constants';
 import type { TranslationState } from '@/hooks/useSigningModeTranslation';
+
+const TEXT_SIZE_CLASS = {
+  small: 'text-base',
+  medium: 'text-lg',
+  large: 'text-2xl',
+} as const;
 
 interface TranscriptionBoxProps {
   translationState?: TranslationState;
@@ -21,6 +28,11 @@ export function TranscriptionBox({
   translationId = null,
 }: TranscriptionBoxProps) {
   const { lastTranslation, isProcessing, sessionId } = useAppStore();
+  const { preferences } = useUserStore();
+  const textSizeClass = TEXT_SIZE_CLASS[preferences.textSize] || TEXT_SIZE_CLASS.medium;
+  const hc = preferences.highContrast;
+  const accentColor = hc ? 'text-yellow-400' : 'text-gray-200';
+  const bgClass = hc ? 'bg-black/80' : 'bg-gray-900/80';
 
   const [dismissedTranslationId, setDismissedTranslationId] = useState<string | null>(null);
   const [retryCountdown, setRetryCountdown] = useState<number | null>(null);
@@ -87,7 +99,7 @@ export function TranscriptionBox({
   return (
     <div className="w-full max-w-md px-4">
       <motion.div
-        className="rounded-lg bg-black/80 px-4 py-3 backdrop-blur-sm"
+        className={`rounded-lg ${bgClass} px-4 py-3 backdrop-blur-sm`}
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
@@ -105,7 +117,7 @@ export function TranscriptionBox({
                 {[0, 1, 2].map((i) => (
                   <motion.div
                     key={i}
-                    className="h-2 w-2 rounded-full bg-yellow-400"
+                    className={`h-2 w-2 rounded-full ${hc ? 'bg-yellow-400' : 'bg-gray-400'}`}
                     animate={{ y: [0, -8, 0] }}
                     transition={{
                       duration: 0.6,
@@ -115,7 +127,7 @@ export function TranscriptionBox({
                   />
                 ))}
               </div>
-              <span className="text-lg font-medium text-yellow-400">
+              <span className={`${textSizeClass} font-medium ${accentColor}`}>
                 Processing...
               </span>
             </motion.div>
@@ -125,8 +137,8 @@ export function TranscriptionBox({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className={`text-lg font-medium ${
-                translationState === 'error' ? 'text-red-400' : 'text-yellow-400'
+              className={`${textSizeClass} font-medium ${
+                translationState === 'error' ? 'text-red-400' : accentColor
               }`}
             >
               {getMessage()}
