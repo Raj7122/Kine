@@ -199,6 +199,7 @@ function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
           className="absolute inset-0 h-full w-full"
           onLandmarksDetected={handleLandmarksDetected}
           showFaceMesh={false}
+          showVisuals={IS_DEV}
         />
       )}
 

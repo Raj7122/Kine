@@ -29,6 +29,7 @@ interface HandTrackerProps {
   onGestureDetected?: (gesture: GestureResult | null) => void;
   showFaceMesh?: boolean;
   enableGestureRecognition?: boolean;
+  showVisuals?: boolean;
 }
 
 export function HandTracker({
@@ -38,6 +39,7 @@ export function HandTracker({
   onGestureDetected,
   showFaceMesh = false,
   enableGestureRecognition = true,
+  showVisuals = false,
 }: HandTrackerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -127,7 +129,7 @@ export function HandTracker({
       // Clear and redraw with cached landmarks at 60 FPS
       clearCanvas(ctx);
 
-      if (cachedHandResultRef.current) {
+      if (showVisuals && cachedHandResultRef.current) {
         drawHandLandmarks(
           ctx,
           cachedHandResultRef.current,
@@ -137,7 +139,7 @@ export function HandTracker({
         );
       }
 
-      if (cachedFaceResultRef.current) {
+      if (showVisuals && cachedFaceResultRef.current) {
         drawFaceLandmarks(
           ctx,
           cachedFaceResultRef.current,
@@ -159,7 +161,7 @@ export function HandTracker({
         cancelAnimationFrame(drawFrameRef.current);
       }
     };
-  }, [isInitialized, showFaceMesh]);
+  }, [isInitialized, showFaceMesh, showVisuals]);
 
   // Detection loop (runs at LANDMARK_SAMPLING_RATE)
   useEffect(() => {
