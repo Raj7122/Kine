@@ -53,9 +53,7 @@ export function TranscriptionBox({
   const showFeedback = Boolean(
     lastTranslation &&
       translationId &&
-      dismissedTranslationId !== translationId &&
-      !showSpinner &&
-      translationState !== 'pause_detected'
+      dismissedTranslationId !== translationId
   );
 
   // Get message based on translation state
