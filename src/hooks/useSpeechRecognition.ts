@@ -147,8 +147,17 @@ export function useSpeechRecognition(
       }
     };
 
-    recognition.onerror = (event) => {
-      console.error('[Speech] Recognition error:', event);
+    recognition.onerror = (event: Event & { error?: string; message?: string }) => {
+      const errorType = event.error || 'unknown';
+      const errorMsg = event.message || '';
+      console.error('[Speech] Recognition error:', errorType, errorMsg);
+
+      // no-speech and aborted are transient — don't show error state
+      if (errorType === 'no-speech' || errorType === 'aborted') {
+        console.log('[Speech] Transient error, will auto-restart');
+        return;
+      }
+
       setState('error');
       setIsListening(false);
     };
@@ -156,8 +165,15 @@ export function useSpeechRecognition(
     recognition.onend = () => {
       console.log('[Speech] Recognition ended');
       setIsListening(false);
+      // Auto-restart if we were still in listening state (handles transient errors like no-speech)
       if (state === 'listening') {
-        setState('idle');
+        try {
+          recognition.start();
+          console.log('[Speech] Auto-restarted after onend');
+        } catch {
+          console.log('[Speech] Could not auto-restart, going idle');
+          setState('idle');
+        }
       }
     };
 
