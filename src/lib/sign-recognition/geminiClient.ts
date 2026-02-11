@@ -4,7 +4,7 @@
  * with prompt augmentation and runtime learned corrections.
  */
 
-import type { SignLandmarkData, VideoFrame } from '@/lib/gemini/signRecognitionService';
+import type { SignLandmarkData, VideoFrame } from './shared';
 import type { SignRecognizeResult } from './types';
 
 export interface GeminiRecognitionOptions {

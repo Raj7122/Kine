@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { SIGN_RECOGNITION_FRAME_COUNT } from '@/config/constants';
+import { ASL_INTERPRETATION_PROMPT } from '@/lib/gemini/signRecognitionService';
 import {
-  ASL_INTERPRETATION_PROMPT,
   formatLandmarksForPrompt,
   type LandmarkBuffer,
-} from '@/lib/gemini/signRecognitionService';
+} from '@/lib/sign-recognition/shared';
 
 import type { SignRecognizeResult } from '@/lib/sign-recognition/types';
 import {
@@ -118,13 +118,50 @@ function getClientIp(request: NextRequest): string | null {
 function cleanGeminiResponseText(responseText: string): string {
   let cleaned = responseText.trim();
 
+  // Strip code blocks
   cleaned = cleaned.replace(/```[\s\S]*?```/g, '').trim();
+
+  // Strip surrounding quotes
   cleaned = cleaned.replace(/^['"]|['"]$/g, '').trim();
+
+  // If the response contains multiple lines, Gemini likely returned analysis.
+  // Take only the LAST short line (usually the actual answer) or the first line
+  // that looks like a clean translation (short, no colons/frame refs).
+  const lines = cleaned.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length > 1) {
+    // Look for a line that's a clean short answer (no frame refs, no colons with numbers)
+    const cleanLine = lines.find(l =>
+      l.length < 80 &&
+      !/^\d+[:.]/.test(l) &&
+      !/frame/i.test(l) &&
+      !/landmark/i.test(l) &&
+      !/hand stays/i.test(l) &&
+      !/analysis/i.test(l)
+    );
+    if (cleanLine) {
+      cleaned = cleanLine;
+    } else {
+      // Fallback: take the last line (often the conclusion)
+      cleaned = lines[lines.length - 1];
+    }
+  }
+
+  // Strip numbered frame prefixes like "16:" or "Frame 5:"
+  cleaned = cleaned.replace(/^(Frame\s*)?\d+\s*[:.]\s*/i, '').trim();
+
+  // Collapse whitespace
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // Strip common preamble phrases
   cleaned = cleaned.replace(
-    /^(The person is signing |The sign means |This means |Translation: )/i,
+    /^(The person is signing |The sign means |This means |Translation: |The sign is |It looks like |Based on .{0,50}, |I think .{0,30} is )/i,
     ''
   );
+
+  // Strip trailing period for single-word/short answers
+  if (cleaned.length < 40) {
+    cleaned = cleaned.replace(/\.$/, '');
+  }
 
   return cleaned.trim();
 }
@@ -215,7 +252,7 @@ export async function POST(request: NextRequest) {
     if (lstmHint) {
       landmarkSection += `\n\n## Detection Context\n${lstmHint}\nUse this as supporting evidence but verify with the visual data.`;
     }
-    const taskSection = '\n\n## Task\nBased on the video frames and landmark data above, what is being signed? Respond with ONLY the English translation.';
+    const taskSection = '\n\n## Task\nBased on the video frames and landmark data above, what is being signed?\n\n**OUTPUT FORMAT**: Respond with ONLY the English word or short phrase. Do NOT include frame numbers, analysis, descriptions of hand positions, or explanations. Just the translation.\nExamples of correct output: "Hello", "Thank you", "Nice to meet you", "Y"\nExamples of WRONG output: "Frame 16: Hand stays relatively static", "The hand appears to be waving"';
 
     // Sample video frames
     const frameCount = Math.min(videoFrames.length, SIGN_RECOGNITION_FRAME_COUNT);

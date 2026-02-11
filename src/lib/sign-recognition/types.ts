@@ -1,4 +1,4 @@
-import type { SignLandmarkData, VideoFrame } from '@/lib/gemini/signRecognitionService';
+import type { SignLandmarkData, VideoFrame } from './shared';
 
 export type SignRecognizeSource =
   | 'gemini'

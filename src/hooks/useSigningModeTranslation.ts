@@ -10,7 +10,7 @@ import {
   captureVideoFrame,
   type SignLandmarkData,
   type VideoFrame,
-} from '@/lib/openai';
+} from '@/lib/sign-recognition/shared';
 import { recognizeSignWithGemini } from '@/lib/sign-recognition/geminiClient';
 import { synthesizeSpeech, playAudioBlob } from '@/lib/elevenlabs';
 import { saveMessage, generateSessionId } from '@/lib/supabase';
