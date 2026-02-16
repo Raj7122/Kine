@@ -384,7 +384,8 @@ def main():
     try:
         model.export(output_dir / 'final_model')  # SavedModel format for TF.js (Keras 3)
     except AttributeError:
-        model.save(output_dir / 'final_model')
+        print("Warning: model.export() not available (pre-Keras 3). "
+              "SavedModel format not saved. Use final_model.keras with export_tfjs.py instead.")
 
     print(f"\nTraining complete!")
     print(f"  Model type: {'Legacy Bi-LSTM' if args.legacy_model else 'Research-grade CNN-LSTM'}")

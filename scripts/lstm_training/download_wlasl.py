@@ -206,7 +206,7 @@ def main():
 
     # Select vocabulary based on size
     if args.vocab_size <= len(WLASL_TARGET_VOCABULARY):
-        vocab = WLASL_TARGET_VOCABULARY
+        vocab = WLASL_TARGET_VOCABULARY[:args.vocab_size]
     else:
         # For larger vocabularies, use all available up to the limit
         vocab = [entry['gloss'] for entry in wlasl_data[:args.vocab_size]]

@@ -134,7 +134,28 @@ def convert_keras_to_tfjs(
         from model import AttentionLayer
     except ImportError:
         # Fallback: define minimal AttentionLayer for deserialization
-        from model import AttentionLayer  # noqa: F811
+        # when model.py is not on sys.path (e.g. running from a different cwd)
+        import tensorflow as _tf
+
+        @_tf.keras.utils.register_keras_serializable(package='Custom')
+        class AttentionLayer(_tf.keras.layers.Layer):  # type: ignore[no-redef]
+            def __init__(self, units=64, **kwargs):
+                super().__init__(**kwargs)
+                self.units = units
+
+            def build(self, input_shape):
+                feat = input_shape[-1]
+                self.W = self.add_weight('attention_weight', (feat, self.units), initializer='glorot_uniform')
+                self.b = self.add_weight('attention_bias', (self.units,), initializer='zeros')
+                self.u = self.add_weight('attention_context', (self.units,), initializer='glorot_uniform')
+
+            def call(self, inputs):
+                score = _tf.nn.tanh(_tf.matmul(inputs, self.W) + self.b)
+                alpha = _tf.nn.softmax(_tf.reduce_sum(score * self.u, axis=-1), axis=-1)
+                return _tf.reduce_sum(inputs * _tf.expand_dims(alpha, -1), axis=1)
+
+            def get_config(self):
+                return {**super().get_config(), 'units': self.units}
 
     print(f"Loading Keras model: {keras_model_path}")
     model = keras.models.load_model(
