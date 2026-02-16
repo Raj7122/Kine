@@ -437,14 +437,15 @@ def create_dataset(
 
         if len(X_list) == 0:
             print(f"  Warning: No samples for {split_name}")
-            continue
-
-        # Convert to numpy arrays
-        X = np.array(X_list, dtype=np.float32)
-        y = np.array(y_list, dtype=np.int32)
+            X = np.zeros((0, WINDOW_SIZE, feature_count), dtype=np.float32)
+            y = np.zeros((0,), dtype=np.int32)
+        else:
+            # Convert to numpy arrays
+            X = np.array(X_list, dtype=np.float32)
+            y = np.array(y_list, dtype=np.int32)
 
         # Shuffle training data
-        if split_name == 'train':
+        if split_name == 'train' and len(X) > 0:
             indices = np.random.permutation(len(X))
             X = X[indices]
             y = y[indices]
@@ -476,6 +477,38 @@ def create_dataset(
         json.dump(metadata, f, indent=2)
 
     return stats
+
+
+def load_vocabulary_from_input(input_dir: Path) -> List[str]:
+    """
+    Load vocabulary order from vocabulary.json when available.
+
+    This keeps class index ordering stable across training/inference.
+    Falls back to sorted directory names if the file is missing or invalid.
+    """
+    vocab_path = input_dir / 'vocabulary.json'
+    sign_dirs = {d.name for d in input_dir.iterdir() if d.is_dir()}
+
+    if vocab_path.exists():
+        try:
+            with open(vocab_path, 'r') as f:
+                payload = json.load(f)
+
+            if isinstance(payload, dict):
+                vocab = payload.get('vocabulary', [])
+            elif isinstance(payload, list):
+                vocab = payload
+            else:
+                vocab = []
+
+            if isinstance(vocab, list):
+                ordered = [str(item) for item in vocab if isinstance(item, str) and str(item) in sign_dirs]
+                if ordered:
+                    return ordered
+        except Exception as exc:
+            print(f"Warning: Failed to load vocabulary.json ({exc}); falling back to sorted dirs")
+
+    return sorted(sign_dirs)
 
 
 def main():
@@ -511,8 +544,8 @@ def main():
     with open(splits_path, 'r') as f:
         splits = json.load(f)
 
-    # Get vocabulary from directory structure
-    vocabulary = sorted([d.name for d in input_dir.iterdir() if d.is_dir()])
+    # Get vocabulary with stable ordering
+    vocabulary = load_vocabulary_from_input(input_dir)
 
     if len(vocabulary) == 0:
         print("No sign directories found")

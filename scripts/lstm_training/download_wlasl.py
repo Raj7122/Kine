@@ -6,7 +6,7 @@ Downloads videos from the WLASL (Word-Level American Sign Language) dataset.
 WLASL is available at: https://github.com/dxli94/WLASL
 
 Usage:
-    python download_wlasl.py --output ./data/wlasl --vocab-size 25
+    python download_wlasl.py --output ./data/wlasl --vocab-size 10
 """
 
 import argparse
@@ -19,13 +19,18 @@ import requests
 from tqdm import tqdm
 import subprocess
 
-# WLASL-25 Vocabulary (common dynamic signs)
-WLASL_25_VOCABULARY = [
-    'hello', 'goodbye', 'please', 'thank you', 'sorry',
-    'want', 'need', 'help', 'like', 'understand',
-    'what', 'where', 'who', 'when', 'why', 'how',
-    'yes', 'no', 'maybe', 'good', 'bad',
-    'I', 'you', 'name', 'finish',
+# WLASL vocabulary for signs not available in Kaggle
+WLASL_TARGET_VOCABULARY = [
+    'sorry',
+    'help',
+    'understand',
+    'want',
+    'name',
+    'what',
+    'when',
+    'how',
+    'meet',
+    'again',
 ]
 
 # WLASL JSON URLs (official GitHub)
@@ -181,8 +186,8 @@ def main():
     parser = argparse.ArgumentParser(description='Download WLASL dataset')
     parser.add_argument('--output', type=str, default='./data/wlasl',
                         help='Output directory for downloaded videos')
-    parser.add_argument('--vocab-size', type=int, default=25,
-                        help='Vocabulary size (25, 100, 300, 1000, 2000)')
+    parser.add_argument('--vocab-size', type=int, default=10,
+                        help='Vocabulary size (10 targeted signs by default, or larger sample from WLASL)')
     parser.add_argument('--max-videos', type=int, default=20,
                         help='Maximum videos per sign')
     parser.add_argument('--cache-dir', type=str, default='./cache',
@@ -200,8 +205,8 @@ def main():
     wlasl_data = load_wlasl_json(cache_dir)
 
     # Select vocabulary based on size
-    if args.vocab_size <= 25:
-        vocab = WLASL_25_VOCABULARY
+    if args.vocab_size <= len(WLASL_TARGET_VOCABULARY):
+        vocab = WLASL_TARGET_VOCABULARY
     else:
         # For larger vocabularies, use all available up to the limit
         vocab = [entry['gloss'] for entry in wlasl_data[:args.vocab_size]]

@@ -16,6 +16,10 @@ import {
 import { checkSlidingWindowRateLimit } from '@/lib/sign-recognition/rateLimit';
 import { buildAugmentedPrompt } from '@/lib/sign-recognition/promptAugmentation';
 import { applyRuntimeLearnedCorrections } from '@/lib/sign-recognition/learnedCorrections';
+import {
+  recordSignRecognitionEvent,
+  type SignRecognitionEventStatus,
+} from '@/lib/sign-recognition/monitoring';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 
 export const runtime = 'nodejs';
@@ -167,9 +171,41 @@ function cleanGeminiResponseText(responseText: string): string {
 }
 
 export async function POST(request: NextRequest) {
+  const requestStartedAt = Date.now();
+  let trackingSessionId: string | undefined;
+  let trackingSampleId: string | undefined;
+  let trackingProvider: AIProvider | undefined;
+  let trackingPayloadBytes: number | undefined;
+
+  const recordEvent = (
+    status: SignRecognitionEventStatus,
+    details: {
+      source?: string;
+      corrected?: boolean;
+      confidence?: number;
+      text?: string;
+      error?: string;
+    } = {}
+  ) => {
+    recordSignRecognitionEvent({
+      sessionId: trackingSessionId ?? null,
+      sampleId: trackingSampleId,
+      provider: trackingProvider,
+      status,
+      latencyMs: Date.now() - requestStartedAt,
+      payloadBytes: trackingPayloadBytes,
+      ...details,
+    });
+  };
+
   try {
     const contentLength = getContentLengthBytes(request.headers);
+    if (contentLength !== null) {
+      trackingPayloadBytes = contentLength;
+    }
+
     if (contentLength !== null && contentLength > SIGN_RECOGNIZE_MAX_PAYLOAD_BYTES) {
+      recordEvent('validation_error', { error: 'payload_too_large_header' });
       return NextResponse.json(
         { success: false, error: 'Payload too large' },
         { status: 413 }
@@ -180,6 +216,7 @@ export async function POST(request: NextRequest) {
     try {
       rawBody = await request.json();
     } catch {
+      recordEvent('validation_error', { error: 'invalid_json_body' });
       return NextResponse.json(
         { success: false, error: 'Invalid JSON body' },
         { status: 400 }
@@ -187,7 +224,9 @@ export async function POST(request: NextRequest) {
     }
 
     const approxBytes = Buffer.byteLength(JSON.stringify(rawBody), 'utf8');
+    trackingPayloadBytes = approxBytes;
     if (approxBytes > SIGN_RECOGNIZE_MAX_PAYLOAD_BYTES) {
+      recordEvent('validation_error', { error: 'payload_too_large_computed' });
       return NextResponse.json(
         { success: false, error: 'Payload too large' },
         { status: 413 }
@@ -196,6 +235,7 @@ export async function POST(request: NextRequest) {
 
     const validated = validateSignRecognizeRequestBody(rawBody);
     if (!validated.ok) {
+      recordEvent('validation_error', { error: validated.error.error });
       return NextResponse.json(
         { success: false, error: validated.error.error },
         { status: validated.error.status }
@@ -203,12 +243,14 @@ export async function POST(request: NextRequest) {
     }
 
     const { frames, videoFrames, sessionId, lstmHint } = validated.value;
+    trackingSessionId = sessionId;
 
     const ip = getClientIp(request);
     const rateKey = sessionId ? `session:${sessionId}` : ip ? `ip:${ip}` : 'unknown';
 
     const rate = checkSlidingWindowRateLimit(rateKey);
     if (!rate.allowed) {
+      recordEvent('rate_limited', { error: 'local_rate_limit_exceeded' });
       return NextResponse.json(
         { success: false, error: 'Rate limit exceeded' },
         {
@@ -222,10 +264,13 @@ export async function POST(request: NextRequest) {
 
     const persistedSampleId = await persistSignRecognitionSample(sessionId, frames, videoFrames);
     const sampleId = persistedSampleId ?? undefined;
+    trackingSampleId = sampleId;
 
     const provider = getProvider();
+    trackingProvider = provider;
     if (provider === 'none') {
       console.error('[SignRecognize API] No AI API key configured');
+      recordEvent('provider_unavailable', { error: 'missing_ai_api_key' });
       return NextResponse.json(
         { success: false, error: 'No AI API key configured. Set OPENAI_API_KEY or GEMINI_API_KEY in your environment.' },
         { status: 503 }
@@ -312,11 +357,14 @@ export async function POST(request: NextRequest) {
 
           if (response.status === 429) {
             const retryAfter = response.headers.get('retry-after') || '60';
+            recordEvent('rate_limited', { error: 'openai_rate_limit' });
             return NextResponse.json(
               { success: false, error: 'OpenAI rate limit reached. Please wait a moment.', sampleId },
               { status: 429, headers: { 'Retry-After': retryAfter } }
             );
           }
+
+          recordEvent('upstream_error', { error: `openai_${response.status}` });
 
           return NextResponse.json(
             { success: false, error: `OpenAI API error (${response.status}). Please try again.`, sampleId },
@@ -366,11 +414,14 @@ export async function POST(request: NextRequest) {
 
           if (response.status === 429) {
             const retryAfter = response.headers.get('retry-after') || '60';
+            recordEvent('rate_limited', { error: 'gemini_rate_limit' });
             return NextResponse.json(
               { success: false, error: 'Gemini rate limit reached. Please wait a moment.', sampleId },
               { status: 429, headers: { 'Retry-After': retryAfter } }
             );
           }
+
+          recordEvent('upstream_error', { error: `gemini_${response.status}` });
 
           return NextResponse.json(
             { success: false, error: `Gemini API error (${response.status}). Please try again.`, sampleId },
@@ -383,16 +434,20 @@ export async function POST(request: NextRequest) {
       }
 
       const originalText = cleanGeminiResponseText(responseText);
+      const baseSource = (videoFrames.length > 0 ? `${provider}-vision` : provider) as SignRecognizeResult['source'];
+      const baseConfidence = videoFrames.length > 0 ? 0.9 : 0.75;
 
       if (!originalText) {
         console.warn('[SignRecognize API] AI returned empty response');
+        recordEvent('empty', {
+          source: baseSource,
+          confidence: 0,
+          text: '',
+        });
         return NextResponse.json(
           { success: true, text: '', originalText: '', corrected: false, confidence: 0, source: provider, sampleId },
         );
       }
-
-      const baseSource = (videoFrames.length > 0 ? `${provider}-vision` : provider) as SignRecognizeResult['source'];
-      const baseConfidence = videoFrames.length > 0 ? 0.9 : 0.75;
 
       const corrected = await applyRuntimeLearnedCorrections(originalText);
 
@@ -411,10 +466,18 @@ export async function POST(request: NextRequest) {
         sampleId,
       };
 
+      recordEvent('success', {
+        source: result.source,
+        corrected: result.corrected,
+        confidence: result.confidence,
+        text: result.text,
+      });
+
       return NextResponse.json({ success: true, ...result });
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
         console.warn('[SignRecognize API] Request timed out');
+        recordEvent('timeout', { error: 'request_timeout' });
         return NextResponse.json(
           { success: false, error: 'Sign recognition timed out. Please try a clearer sign.', sampleId },
           { status: 504 }
@@ -422,6 +485,8 @@ export async function POST(request: NextRequest) {
       }
 
       console.error('[SignRecognize API] Error:', error);
+      const message = error instanceof Error ? error.message : 'unknown_sign_recognition_error';
+      recordEvent('internal_error', { error: message });
       return NextResponse.json(
         { success: false, error: 'Sign recognition failed. Please try again.', sampleId },
         { status: 500 }
@@ -432,6 +497,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[SignRecognize API] Error:', error);
     const message = error instanceof Error ? error.message : 'Unknown error';
+    recordEvent('internal_error', { error: message });
     return NextResponse.json(
       { success: false, error: message },
       { status: 500 }

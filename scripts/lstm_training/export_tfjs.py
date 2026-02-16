@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 import subprocess
@@ -26,12 +27,27 @@ import numpy as np
 
 
 def check_tensorflowjs_installed() -> bool:
-    """Check if tensorflowjs is installed."""
-    try:
-        import tensorflowjs
-        return True
-    except ImportError:
-        return False
+    """Check if tensorflowjs_converter CLI is available."""
+    return get_tensorflowjs_converter_path() is not None
+
+
+def get_tensorflowjs_converter_path() -> Optional[str]:
+    """Find tensorflowjs_converter executable path."""
+    converter_path = shutil.which('tensorflowjs_converter')
+    if converter_path:
+        return converter_path
+
+    candidates = [
+        Path(sys.prefix) / 'bin' / 'tensorflowjs_converter',
+        Path(sys.executable).resolve().parent / 'tensorflowjs_converter',
+        Path(__file__).resolve().parent / 'venv' / 'bin' / 'tensorflowjs_converter',
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    return None
 
 
 def convert_to_tfjs(
@@ -52,9 +68,14 @@ def convert_to_tfjs(
     """
     os.makedirs(output_dir, exist_ok=True)
 
+    converter_path = get_tensorflowjs_converter_path()
+    if converter_path is None:
+        print("tensorflowjs_converter executable not found")
+        return False
+
     # Build conversion command
     cmd = [
-        'tensorflowjs_converter',
+        converter_path,
         '--input_format=tf_saved_model',
         '--output_format=tfjs_graph_model',
         '--signature_name=serving_default',
@@ -108,8 +129,18 @@ def convert_keras_to_tfjs(
 
     os.makedirs(output_dir, exist_ok=True)
 
+    # Register custom layers before loading
+    try:
+        from model import AttentionLayer
+    except ImportError:
+        # Fallback: define minimal AttentionLayer for deserialization
+        from model import AttentionLayer  # noqa: F811
+
     print(f"Loading Keras model: {keras_model_path}")
-    model = keras.models.load_model(keras_model_path)
+    model = keras.models.load_model(
+        keras_model_path,
+        custom_objects={'AttentionLayer': AttentionLayer},
+    )
 
     print(f"Converting to TF.js layers format...")
 
@@ -146,7 +177,7 @@ def generate_metadata(
     """
     metadata = {
         'modelFormat': 'tfjs_layers_model',
-        'inputShape': [1, 32, 126],
+        'inputShape': [1, 16, 63],
         'outputShape': [1, 25],
     }
 
@@ -158,8 +189,8 @@ def generate_metadata(
         metadata.update({
             'vocabulary': training_results.get('vocabulary', []),
             'numClasses': training_results.get('num_classes', 25),
-            'windowSize': training_results.get('window_size', 32),
-            'featureCount': training_results.get('feature_count', 126),
+            'windowSize': training_results.get('window_size', 16),
+            'featureCount': training_results.get('feature_count', 63),
             'trainedAt': training_results.get('timestamp'),
             'testAccuracy': training_results.get('evaluation', {}).get('test_accuracy'),
             'bestValAccuracy': training_results.get('best_val_accuracy'),
@@ -214,7 +245,7 @@ def main():
                         help='Path to trained model (SavedModel dir or .keras file)')
     parser.add_argument('--output', type=str, default='../public/models',
                         help='Output directory for TF.js model')
-    parser.add_argument('--name', type=str, default='asl_lstm_25',
+    parser.add_argument('--name', type=str, default='asl_cnn_lstm_25',
                         help='Model name (used for output subdirectory)')
     parser.add_argument('--quantization', type=str, default='float16',
                         choices=['float16', 'uint8', 'none'],

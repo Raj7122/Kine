@@ -1,0 +1,51 @@
+{
+  "modelFormat": "tfjs_layers_model",
+  "inputShape": [
+    1,
+    16,
+    63
+  ],
+  "outputShape": [
+    1,
+    29
+  ],
+  "vocabulary": [
+    "HELLO",
+    "PLEASE",
+    "THANK_YOU",
+    "LIKE",
+    "WHERE",
+    "WHO",
+    "WHY",
+    "YES",
+    "NO",
+    "BAD",
+    "FINISH",
+    "GOODBYE",
+    "GOOD",
+    "NEED",
+    "CLEAN",
+    "FOOD",
+    "DRINK",
+    "WATER",
+    "BATHROOM",
+    "SORRY",
+    "HELP",
+    "UNDERSTAND",
+    "WANT",
+    "NAME",
+    "WHAT",
+    "WHEN",
+    "HOW",
+    "MEET",
+    "AGAIN"
+  ],
+  "numClasses": 29,
+  "windowSize": 16,
+  "featureCount": 63,
+  "trainedAt": "2026-02-15T19:27:14.697125",
+  "testAccuracy": 0.801556408405304,
+  "bestValAccuracy": 0.7289719581604004,
+  "modelSizeBytes": 118157478,
+  "modelSizeMB": 112.68
+}

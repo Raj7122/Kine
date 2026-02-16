@@ -186,7 +186,7 @@ export function FeedbackButtons({
     setIsSubmitting(true);
     setErrorMessage(null);
     const elapsedMs = Date.now() - shownAtRef.current;
-    const geminiOutput = recognition.originalText;
+    const geminiOutput = recognition.text;
 
     console.log('[FeedbackUI] Submitting negative feedback', {
       sessionId,

@@ -77,6 +77,7 @@ export const LSTM_WINDOW_SIZE = 16;           // frames (~530ms at 30fps - resea
 export const LSTM_STRIDE = 8;                 // 50% overlap for dense inference
 export const LSTM_MIN_MOTION_FRAMES = 4;      // reduced for smaller window
 export const LSTM_CONFIDENCE_THRESHOLD = 0.7; // prediction threshold
+export const LSTM_SHORTCIRCUIT_THRESHOLD = 0.85; // skip Gemini when LSTM is highly confident
 export const LSTM_MODEL_PATH = '/models/asl_cnn_lstm_25.json';
 export const LSTM_FEATURE_COUNT = 63;         // 21 landmarks × 3 coords × 1 dominant hand
 
@@ -103,13 +104,17 @@ export const ENSEMBLE_AGREEMENT_BOOST = 0.15; // Confidence boost when sources a
 export const DYNAMIC_MODE_STILLNESS_THRESHOLD = 1000; // ms - extended stillness for dynamic signs (faster)
 export const DYNAMIC_MODE_BUFFER_THRESHOLD = 8;       // frames - minimum motion frames to trigger dynamic mode
 
-// LSTM vocabulary (25 common dynamic signs)
+// LSTM target vocabulary (29 signs: 19 Kaggle + 10 WLASL)
 export const LSTM_VOCABULARY = [
-  'HELLO', 'GOODBYE', 'PLEASE', 'THANK_YOU', 'SORRY',
-  'WANT', 'NEED', 'HELP', 'LIKE', 'UNDERSTAND',
-  'WHAT', 'WHERE', 'WHO', 'WHEN', 'WHY', 'HOW',
-  'YES', 'NO', 'MAYBE', 'GOOD', 'BAD',
-  'I', 'YOU', 'NAME', 'FINISH',
+  // Existing 11-sign model order (kept first for backward compatibility)
+  'HELLO', 'PLEASE', 'THANK_YOU', 'LIKE', 'WHERE',
+  'WHO', 'WHY', 'YES', 'NO', 'BAD', 'FINISH',
+  // Kaggle expansion
+  'GOODBYE', 'GOOD', 'NEED', 'CLEAN', 'FOOD',
+  'DRINK', 'WATER', 'BATHROOM',
+  // WLASL expansion
+  'SORRY', 'HELP', 'UNDERSTAND', 'WANT', 'NAME',
+  'WHAT', 'WHEN', 'HOW', 'MEET', 'AGAIN',
 ] as const;
 
 export type LSTMSignClass = typeof LSTM_VOCABULARY[number];

@@ -8,8 +8,8 @@ After training and exporting the model, this directory should contain:
 
 ```
 models/
-├── asl_lstm_25.json          # Model entry point
-├── asl_lstm_25/              # Model assets directory
+├── asl_cnn_lstm_25.json      # Model entry point
+├── asl_cnn_lstm_25/          # Model assets directory
 │   ├── model.json            # Model topology
 │   ├── group1-shard1of1.bin  # Model weights
 │   └── metadata.json         # Training metadata
@@ -28,35 +28,43 @@ To train the LSTM model:
    pip install -r requirements.txt
    ```
 
-2. **Download WLASL dataset:**
+2. **Prepare Kaggle dataset (default):**
    ```bash
-   python download_wlasl.py --output ./data/wlasl --vocab-size 25
+   python prepare_kaggle_data.py --download --competition asl-signs --output ./data/landmarks
    ```
 
-3. **Extract landmarks:**
+   **Or use WLASL fallback:**
    ```bash
+   python download_wlasl.py --output ./data/wlasl --vocab-size 25
    python extract_landmarks.py --input ./data/wlasl --output ./data/landmarks --split
    ```
 
-4. **Preprocess data:**
+3. **Preprocess data:**
    ```bash
    python preprocess.py --input ./data/landmarks --output ./data/processed
    ```
 
-5. **Train model:**
+4. **Train model:**
    ```bash
    python train.py --data ./data/processed --output ./models --epochs 100
    ```
 
-6. **Export to TensorFlow.js:**
+5. **Export to TensorFlow.js:**
    ```bash
-   python export_tfjs.py --model ./models/run_xxx/final_model --output ../../public/models
+   python export_tfjs.py --model ./models/run_xxx/final_model.keras --output ../../public/models --name asl_cnn_lstm_25
    ```
+
+Or run the all-in-one pipeline:
+
+```bash
+./train_asl_model.sh                 # Kaggle default
+./train_asl_model.sh --source wlasl # WLASL fallback
+```
 
 ## Model Architecture
 
-- **Input:** (batch, 32, 126) - 32 frames × 126 features
-- **Architecture:** Bi-LSTM with Attention
+- **Input:** (batch, 16, 63) - 16 frames × 63 features (dominant hand)
+- **Architecture:** CNN-LSTM with Attention
 - **Output:** 25 sign classes (softmax)
 - **Target size:** < 2MB (quantized)
 

@@ -22,6 +22,7 @@ import tensorflow as tf
 from tensorflow import keras
 
 from model import (
+    AttentionLayer,
     create_model,
     create_cnn_lstm_model,
     compile_model,
@@ -54,13 +55,17 @@ def create_callbacks(
     output_dir: Path,
     patience: int = 15,
     min_delta: float = 0.001,
+    use_validation: bool = True,
 ) -> list:
     """Create training callbacks."""
+
+    accuracy_monitor = 'val_accuracy' if use_validation else 'accuracy'
+    loss_monitor = 'val_loss' if use_validation else 'loss'
 
     callbacks = [
         # Early stopping
         keras.callbacks.EarlyStopping(
-            monitor='val_accuracy',
+            monitor=accuracy_monitor,
             patience=patience,
             min_delta=min_delta,
             restore_best_weights=True,
@@ -70,17 +75,8 @@ def create_callbacks(
         # Model checkpoint
         keras.callbacks.ModelCheckpoint(
             filepath=str(output_dir / 'best_model.keras'),
-            monitor='val_accuracy',
+            monitor=accuracy_monitor,
             save_best_only=True,
-            verbose=1,
-        ),
-
-        # Learning rate reduction
-        keras.callbacks.ReduceLROnPlateau(
-            monitor='val_loss',
-            factor=0.5,
-            patience=5,
-            min_lr=1e-6,
             verbose=1,
         ),
 
@@ -116,7 +112,11 @@ def train_model(
     Returns:
         Training history
     """
-    callbacks = create_callbacks(output_dir, patience=patience)
+    has_validation = len(X_val) > 0 and len(y_val) > 0
+    if not has_validation:
+        print('\nWarning: Validation split is empty. Training without validation metrics.')
+
+    callbacks = create_callbacks(output_dir, patience=patience, use_validation=has_validation)
 
     # Calculate class weights for imbalanced data
     unique, counts = np.unique(y_train, return_counts=True)
@@ -129,7 +129,7 @@ def train_model(
     history = model.fit(
         X_train,
         y_train,
-        validation_data=(X_val, y_val),
+        validation_data=(X_val, y_val) if has_validation else None,
         epochs=epochs,
         batch_size=batch_size,
         callbacks=callbacks,
@@ -349,31 +349,52 @@ def main():
     best_model_path = output_dir / 'best_model.keras'
     if best_model_path.exists():
         print(f"\nLoading best model from: {best_model_path}")
-        model = keras.models.load_model(best_model_path)
+        model = keras.models.load_model(
+            best_model_path,
+            custom_objects={'AttentionLayer': AttentionLayer},
+        )
 
     # Evaluate
-    eval_results = evaluate_model(model, X_test, y_test, metadata['vocabulary'])
+    if len(X_test) > 0 and len(y_test) > 0:
+        eval_results = evaluate_model(model, X_test, y_test, metadata['vocabulary'])
 
-    print(f"\nTest Results:")
-    print(f"  Loss: {eval_results['test_loss']:.4f}")
-    print(f"  Accuracy: {eval_results['test_accuracy']:.4f}")
-    print(f"  Top-3 Accuracy: {eval_results['test_top3_accuracy']:.4f}")
+        print(f"\nTest Results:")
+        print(f"  Loss: {eval_results['test_loss']:.4f}")
+        print(f"  Accuracy: {eval_results['test_accuracy']:.4f}")
+        print(f"  Top-3 Accuracy: {eval_results['test_top3_accuracy']:.4f}")
 
-    print(f"\nPer-class accuracy:")
-    for sign, acc in sorted(eval_results['per_class_accuracy'].items(), key=lambda x: -x[1]):
-        print(f"  {sign}: {acc:.4f}")
+        print(f"\nPer-class accuracy:")
+        for sign, acc in sorted(eval_results['per_class_accuracy'].items(), key=lambda x: -x[1]):
+            print(f"  {sign}: {acc:.4f}")
+    else:
+        print("\nWarning: Test split is empty. Skipping evaluation.")
+        eval_results = {
+            'test_loss': None,
+            'test_accuracy': None,
+            'test_top3_accuracy': None,
+            'per_class_accuracy': {},
+            'n_test_samples': 0,
+        }
 
     # Save results
     save_training_results(output_dir, history, eval_results, metadata, model)
 
     # Save final model in multiple formats
     model.save(output_dir / 'final_model.keras')
-    model.save(output_dir / 'final_model', save_format='tf')  # SavedModel format for TF.js
+    try:
+        model.export(output_dir / 'final_model')  # SavedModel format for TF.js (Keras 3)
+    except AttributeError:
+        model.save(output_dir / 'final_model')
 
     print(f"\nTraining complete!")
     print(f"  Model type: {'Legacy Bi-LSTM' if args.legacy_model else 'Research-grade CNN-LSTM'}")
-    print(f"  Best validation accuracy: {max(history.history['val_accuracy']):.4f}")
-    print(f"  Test accuracy: {eval_results['test_accuracy']:.4f}")
+    best_val = max(history.history.get('val_accuracy', [0]))
+    print(f"  Best validation accuracy: {best_val:.4f}")
+    test_acc = eval_results['test_accuracy']
+    if test_acc is None:
+        print("  Test accuracy: N/A (no test samples)")
+    else:
+        print(f"  Test accuracy: {test_acc:.4f}")
     print(f"  Model saved to: {output_dir}")
     print(f"\nNext step: Run export_tfjs.py to convert to TensorFlow.js format")
     print(f"  Expected model name: asl_{'lstm' if args.legacy_model else 'cnn_lstm'}_25.json")

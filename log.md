@@ -399,6 +399,33 @@
 
 ---
 
+## 2026-02-15 — Bug Fix: Feedback Negative Loop + LSTM Browser/API Model Loading
+
+- **Symptom**: Signs like HELLO were consistently misrecognized as FINISH. The `learned_corrections` table contained a `Hello → FINISH` entry that kept reinforcing itself. LSTM model failed to load in the browser (Keras 3 serialization issues) and the API fallback also returned 500 errors on every prediction attempt.
+- **Root Cause — Feedback Negative Loop**:
+  1. Runtime correction overrides Gemini's correct output ("Hello" → "FINISH").
+  2. User sees "FINISH", clicks 👎, types "Hello" as correction.
+  3. `FeedbackButtons` sent `geminiOutput = recognition.originalText` (raw Gemini output = "Hello") for negative feedback.
+  4. Feedback route stored `gemini_output = "Hello"` with `rating = negative`.
+  5. SQL trigger recorded `sign_accuracy` negative for "Hello" — penalizing Gemini's **correct** answer.
+  6. Lower accuracy for "Hello" → bad correction passes accuracy gate → fires more → more negative feedback → **self-reinforcing loop**.
+  7. User could never recover "Hello" because every rejection of the corrected output penalized the correct answer.
+- **Root Cause — LSTM Loading**:
+  - Browser model: Keras 3 exported `DTypePolicy` objects and `batch_shape` instead of TF.js-compatible `"float32"` strings and `batch_input_shape`.
+  - API route (`/api/lstm/predict`): Still used `loadGraphModel`/`executeAsync` instead of `loadLayersModel`/`predict` after the model was re-exported as a layers model.
+- **Fixes**:
+  - **`FeedbackButtons.tsx`**: Changed negative feedback `geminiOutput` from `recognition.originalText` to `recognition.text` (displayed text). Now `sign_accuracy` correctly penalizes what the user actually saw and rejected.
+  - **`feedback/route.ts`**: Simplified `geminiOutputToStore` to always use `body.correctedText || body.geminiOutput` regardless of rating. Both positive and negative feedback track accuracy of the displayed output.
+  - **`learnedCorrections.ts`**: Made runtime auto-corrections conservative — require sufficient accuracy evidence (≥5 ratings AND accuracy <70%) before auto-correcting. Without data, corrections are skipped and Gemini decides via prompt augmentation instead.
+  - **`model.json` files**: Patched 18 Keras 3 incompatibilities per file (`DTypePolicy` → `"float32"`, `batch_shape` → `batch_input_shape`).
+  - **`/api/lstm/predict/route.ts`**: Switched from `tf.GraphModel`/`executeAsync` to `tf.LayersModel`/`predict`.
+  - **Cleanup**: Created `/api/feedback/cleanup` endpoint. Removed 3 self-referencing corrections (W→W, WATER→WATER, Hello→HELLO). Reset `sign_accuracy` table to rebuild with fixed logic.
+- **Tests**: 260 passing (1 new test for no-accuracy-record case).
+- **Files Created**: `src/app/api/feedback/cleanup/route.ts`
+- **Files Modified**: `src/components/feedback/FeedbackButtons.tsx`, `src/app/api/feedback/route.ts`, `src/lib/sign-recognition/learnedCorrections.ts`, `src/lib/sign-recognition/learnedCorrections.test.ts`, `src/app/api/lstm/predict/route.ts`, `src/app/api/lstm/predict/route.test.ts`, `public/models/asl_cnn_lstm_25/model.json`, `public/models/asl_cnn_lstm_25.json`
+
+---
+
 ## Future Work
 
 - **Decay/recency weighting**: Older corrections should carry less weight than recent ones. Proposed approach: `effectiveCount = occurrenceCount * decayFactor` where `decayFactor = max(0.1, 1 - daysSinceLastSeen / 90)`. Deferred to a later date.

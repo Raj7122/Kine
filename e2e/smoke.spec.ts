@@ -91,4 +91,31 @@ test.describe('Kine App Smoke Tests', () => {
     const viewport = page.locator('meta[name="viewport"]');
     await expect(viewport).toHaveAttribute('content', /width=device-width/);
   });
+
+  test('LSTM model assets are reachable', async ({ page }) => {
+    // The model.json and metadata.json must be served from /models/
+    const modelResp = await page.request.get('/models/asl_cnn_lstm_25/model.json');
+    expect(modelResp.ok()).toBe(true);
+
+    const metaResp = await page.request.get('/models/asl_cnn_lstm_25/metadata.json');
+    expect(metaResp.ok()).toBe(true);
+
+    const meta = await metaResp.json();
+    expect(Array.isArray(meta.vocabulary)).toBe(true);
+    expect(meta.vocabulary.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('no LSTM-related console errors on load', async ({ page }) => {
+    const lstmErrors: string[] = [];
+    page.on('console', (msg) => {
+      if (msg.type() === 'error' && msg.text().toLowerCase().includes('lstm')) {
+        lstmErrors.push(msg.text());
+      }
+    });
+
+    await page.goto('/');
+    await page.waitForTimeout(4_000);
+
+    expect(lstmErrors).toEqual([]);
+  });
 });

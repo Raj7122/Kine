@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
+import { recordFeedbackTrackingEvent } from '@/lib/sign-recognition/monitoring';
 
 interface FeedbackRequest {
   sessionId: string;
@@ -27,14 +28,55 @@ interface FeedbackRequest {
 // In-memory storage for mock mode
 const mockFeedbackStore: FeedbackRequest[] = [];
 
+type FeedbackSummaryRow = Partial<FeedbackRequest> & {
+  session_id?: string;
+  gemini_output?: string;
+  user_correction?: string | null;
+};
+
+function normalizeMetricText(value: string | null | undefined): string {
+  return (value || '').trim().toUpperCase();
+}
+
+function buildFeedbackSummary(rows: FeedbackSummaryRow[]) {
+  const positive = rows.filter((row) => row.rating === 'positive').length;
+  const negative = rows.filter((row) => row.rating === 'negative').length;
+
+  const correctionPairCounts = new Map<string, { from: string; to: string; count: number }>();
+  for (const row of rows) {
+    const from = normalizeMetricText(
+      row.gemini_output || row.geminiOutput || row.originalText || row.correctedText || null
+    );
+    const to = normalizeMetricText(row.user_correction || row.userCorrection || null);
+    if (!from || !to) continue;
+
+    const key = `${from}=>${to}`;
+    const existing = correctionPairCounts.get(key);
+    if (existing) {
+      existing.count += 1;
+    } else {
+      correctionPairCounts.set(key, { from, to, count: 1 });
+    }
+  }
+
+  const topCorrections = [...correctionPairCounts.values()]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  return {
+    total: rows.length,
+    positive,
+    negative,
+    positiveRate: rows.length > 0 ? Number((positive / rows.length).toFixed(4)) : 0,
+    topCorrections,
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body: FeedbackRequest = await request.json();
 
-    const geminiOutputToStore =
-      body.rating === 'negative'
-        ? body.originalText || body.geminiOutput
-        : body.correctedText || body.geminiOutput;
+    const geminiOutputToStore = body.correctedText || body.geminiOutput;
 
     const contextData = (() => {
       const base =
@@ -63,6 +105,18 @@ export async function POST(request: NextRequest) {
           .map((v) => (typeof v === 'string' ? v.trim() : ''))
           .filter((v) => v.length > 0 && v !== primaryCorrection)
       : [];
+
+    const trackFeedback = () => {
+      recordFeedbackTrackingEvent({
+        sessionId: body.sessionId,
+        sampleId: body.sampleId,
+        rating: body.rating,
+        source: body.source,
+        originalText: body.originalText,
+        correctedText: body.correctedText,
+        userCorrection: primaryCorrection || undefined,
+      });
+    };
 
     // Validate required fields
     if (!body.sessionId || !body.geminiOutput || !body.rating) {
@@ -122,7 +176,8 @@ export async function POST(request: NextRequest) {
           errorMessage.includes('sample_id');
 
         if (isMissingSampleColumn) {
-          const { sample_id: _sampleId, ...fallbackPayload } = insertPayload;
+          const fallbackPayload: Record<string, unknown> = { ...insertPayload };
+          delete fallbackPayload.sample_id;
           const { data: fallbackData, error: fallbackError } = await supabase
             .from('translation_feedback')
             .insert(fallbackPayload)
@@ -131,6 +186,7 @@ export async function POST(request: NextRequest) {
 
           if (!fallbackError && fallbackData) {
             console.log('[Feedback API] Stored feedback (without sample_id):', fallbackData.id);
+            trackFeedback();
             return NextResponse.json({
               success: true,
               feedbackId: fallbackData.id,
@@ -171,6 +227,7 @@ export async function POST(request: NextRequest) {
       }
 
       console.log('[Feedback API] Stored feedback:', data.id);
+      trackFeedback();
       return NextResponse.json({
         success: true,
         feedbackId: data.id,
@@ -180,6 +237,7 @@ export async function POST(request: NextRequest) {
 
     // Mock mode - store in memory
     mockFeedbackStore.push(body);
+    trackFeedback();
     console.log('[Feedback API] Mock mode - stored feedback, total:', mockFeedbackStore.length);
 
     return NextResponse.json({
@@ -198,15 +256,27 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const url = new URL(request.url);
+    const sessionId = url.searchParams.get('sessionId')?.trim() || null;
+    const summaryOnly = ['1', 'true', 'yes'].includes((url.searchParams.get('summary') || '').toLowerCase());
+    const parsedLimit = Number(url.searchParams.get('limit') || 50);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(200, Math.max(1, Math.floor(parsedLimit))) : 50;
+
     if (isSupabaseConfigured && supabase) {
       // Get recent feedback for debugging/admin purposes
-      const { data, error } = await supabase
+      let query = supabase
         .from('translation_feedback')
         .select('*')
         .order('created_at', { ascending: false })
-        .limit(50);
+        .limit(limit);
+
+      if (sessionId) {
+        query = query.eq('session_id', sessionId);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('[Feedback API] Supabase error:', error);
@@ -216,18 +286,31 @@ export async function GET() {
         );
       }
 
+      const summary = buildFeedbackSummary(data as FeedbackSummaryRow[]);
+
       return NextResponse.json({
         success: true,
         count: data.length,
-        feedback: data,
+        feedback: summaryOnly ? [] : data,
+        summary,
+        sessionId,
       });
     }
 
     // Mock mode
+    const filtered = sessionId
+      ? mockFeedbackStore.filter((item) => item.sessionId === sessionId)
+      : mockFeedbackStore;
+
+    const limitedFeedback = filtered.slice(-limit).reverse();
+    const summary = buildFeedbackSummary(limitedFeedback);
+
     return NextResponse.json({
       success: true,
-      count: mockFeedbackStore.length,
-      feedback: mockFeedbackStore.slice(-50),
+      count: limitedFeedback.length,
+      feedback: summaryOnly ? [] : limitedFeedback,
+      summary,
+      sessionId,
       mode: 'mock',
     });
 

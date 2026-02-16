@@ -1,5 +1,5 @@
 // LSTM Service for Dynamic ASL Gesture Recognition
-// Uses server-side API for inference (model too large for browser)
+// Uses browser LayersModel inference with API fallback when needed.
 
 import type {
   LSTMPrediction,
@@ -8,6 +8,7 @@ import type {
   TemporalDetectorState,
 } from './types';
 import { windowToTensorInput } from './temporalBuffer';
+import { registerAttentionLayer } from './attentionLayer';
 import {
   LSTM_MODEL_PATH,
   LSTM_CONFIDENCE_THRESHOLD,
@@ -17,18 +18,77 @@ import {
   type LSTMSignClass,
 } from '@/config/constants';
 
-// TensorFlow.js types - we'll dynamically import to avoid SSR issues
-type TFLayersModel = {
-  predict: (input: unknown) => { data: () => Promise<Float32Array>; dispose: () => void };
+type TFTensorLike = {
+  data: () => Promise<ArrayLike<number>>;
+  dispose: () => void;
+};
+
+type TFModelLike = {
+  executeAsync?: (input: unknown) => Promise<unknown>;
+  predict?: (input: unknown) => unknown;
   dispose: () => void;
 };
 
 // Module-level state
-let model: TFLayersModel | null = null;
+let model: TFModelLike | null = null;
 let isLoading = false;
 let loadError: string | null = null;
 let tfjs: typeof import('@tensorflow/tfjs') | null = null;
 let useAPIFallback = false; // Use API when browser model unavailable
+
+function isTensorLike(value: unknown): value is TFTensorLike {
+  return (
+    value !== null
+    && typeof value === 'object'
+    && typeof (value as { data?: unknown }).data === 'function'
+    && typeof (value as { dispose?: unknown }).dispose === 'function'
+  );
+}
+
+function flattenModelOutputs(output: unknown): TFTensorLike[] {
+  if (isTensorLike(output)) {
+    return [output];
+  }
+
+  if (Array.isArray(output)) {
+    return output.filter(isTensorLike);
+  }
+
+  if (output && typeof output === 'object') {
+    return Object.values(output as Record<string, unknown>).filter(isTensorLike);
+  }
+
+  return [];
+}
+
+async function runModelInference(inputTensor: { dispose: () => void }): Promise<Float32Array> {
+  if (!model) {
+    throw new Error('Model not loaded');
+  }
+
+  let rawOutput: unknown;
+
+  // Layers models use predict(); graph models need executeAsync() for dynamic ops
+  if (typeof model.predict === 'function') {
+    rawOutput = model.predict(inputTensor);
+  } else if (typeof model.executeAsync === 'function') {
+    rawOutput = await model.executeAsync(inputTensor);
+  } else {
+    throw new Error('Loaded model does not expose predict or executeAsync');
+  }
+
+  const outputTensors = flattenModelOutputs(rawOutput);
+  if (outputTensors.length === 0) {
+    throw new Error('Model returned no tensor outputs');
+  }
+
+  try {
+    const predictions = await outputTensors[0].data();
+    return Float32Array.from(Array.from(predictions));
+  } finally {
+    outputTensors.forEach((tensor) => tensor.dispose());
+  }
+}
 
 /**
  * Initialize TensorFlow.js and configure backend
@@ -38,6 +98,9 @@ async function initTensorFlow(): Promise<typeof import('@tensorflow/tfjs')> {
 
   // Dynamic import for Next.js compatibility
   tfjs = await import('@tensorflow/tfjs');
+
+  // Register custom layers before loading any model
+  registerAttentionLayer(tfjs);
 
   // Try WebGL backend first for GPU acceleration
   try {
@@ -76,17 +139,19 @@ export async function loadModel(): Promise<boolean> {
     const tf = await initTensorFlow();
 
     console.log('[LSTM] Loading model from:', LSTM_MODEL_PATH);
-    model = await tf.loadLayersModel(LSTM_MODEL_PATH) as unknown as TFLayersModel;
+    model = await tf.loadLayersModel(LSTM_MODEL_PATH) as unknown as TFModelLike;
 
     // Warmup inference to compile WebGL shaders
     console.log('[LSTM] Running warmup inference...');
     const warmupInput = tf.zeros([1, LSTM_WINDOW_SIZE, LSTM_FEATURE_COUNT]);
-    const warmupResult = model.predict(warmupInput);
-    (warmupResult as { dispose: () => void }).dispose();
-    warmupInput.dispose();
+    try {
+      await runModelInference(warmupInput);
+    } finally {
+      warmupInput.dispose();
+    }
 
+    useAPIFallback = false;
     console.log('[LSTM] Model loaded and ready');
-    isLoading = false;
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -94,8 +159,9 @@ export async function loadModel(): Promise<boolean> {
     console.log('[LSTM] Switching to API fallback mode');
     useAPIFallback = true;
     loadError = null; // Clear error since we have a fallback
-    isLoading = false;
     return true; // Return true since API fallback is available
+  } finally {
+    isLoading = false;
   }
 }
 
@@ -129,15 +195,12 @@ export async function predictSign(
     // Create tensor
     const inputTensor = tfjs.tensor3d(inputData);
 
-    // Run inference
-    const outputTensor = model.predict(inputTensor);
-
-    // Get predictions
-    const predictions = await (outputTensor as { data: () => Promise<Float32Array> }).data();
-
-    // Clean up tensors
-    inputTensor.dispose();
-    (outputTensor as { dispose: () => void }).dispose();
+    let predictions: Float32Array;
+    try {
+      predictions = await runModelInference(inputTensor);
+    } finally {
+      inputTensor.dispose();
+    }
 
     // Find best prediction
     let maxProb = 0;
@@ -158,7 +221,7 @@ export async function predictSign(
       }
     }
 
-    const predictedClass = LSTM_VOCABULARY[maxIndex] as LSTMSignClass;
+    const predictedClass = (LSTM_VOCABULARY[maxIndex] || LSTM_VOCABULARY[0]) as LSTMSignClass;
 
     const prediction: LSTMPrediction = {
       class: predictedClass,

@@ -20,7 +20,7 @@ export interface RuntimeCorrectionResult {
   applied?: LearnedCorrection;
 }
 
-const RUNTIME_MIN_OCCURRENCES = 2;
+const RUNTIME_MIN_OCCURRENCES = 3;
 const CACHE_TTL_MS = 10_000;
 
 let cachedAt = 0;

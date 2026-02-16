@@ -3,6 +3,7 @@ import type { SignLandmarkData, VideoFrame } from './shared';
 export type SignRecognizeSource =
   | 'gemini'
   | 'gemini-vision'
+  | 'lstm'
   | 'openai'
   | 'openai-vision'
   | 'gesture';

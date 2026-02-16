@@ -5,13 +5,20 @@ import type { LSTMPrediction } from '@/lib/lstm/types';
 
 // Mock constants
 vi.mock('@/config/constants', () => ({
-  LSTM_WINDOW_SIZE: 32,
-  LSTM_STRIDE: 15,
-  LSTM_MIN_MOTION_FRAMES: 8,
-  LSTM_FEATURE_COUNT: 126,
+  LSTM_WINDOW_SIZE: 16,
+  LSTM_STRIDE: 8,
+  LSTM_MIN_MOTION_FRAMES: 4,
+  LSTM_FEATURE_COUNT: 63,
   LSTM_CONFIDENCE_THRESHOLD: 0.7,
-  LSTM_MODEL_PATH: '/models/asl_lstm_25.json',
-  LSTM_VOCABULARY: ['HELLO', 'GOODBYE', 'PLEASE', 'THANK_YOU', 'SORRY'],
+  LSTM_MODEL_PATH: '/models/asl_cnn_lstm_25.json',
+  LSTM_VOCABULARY: [
+    'HELLO', 'PLEASE', 'THANK_YOU', 'LIKE', 'WHERE',
+    'WHO', 'WHY', 'YES', 'NO', 'BAD', 'FINISH',
+    'GOODBYE', 'GOOD', 'NEED', 'CLEAN', 'FOOD',
+    'DRINK', 'WATER', 'BATHROOM',
+    'SORRY', 'HELP', 'UNDERSTAND', 'WANT', 'NAME',
+    'WHAT', 'WHEN', 'HOW', 'MEET', 'AGAIN',
+  ],
   MIN_MOTION_THRESHOLD: 0.023,
 }));
 
@@ -280,7 +287,7 @@ describe('useLSTMDetection', () => {
         window: [],
         reason: 'stride_reached',
       });
-      const mockFrames = [{ features: Array(126).fill(0), hasMotion: true }];
+      const mockFrames = [{ features: Array(63).fill(0), hasMotion: true }];
       mockBuffer.getWindowForInference.mockReturnValue(mockFrames);
       mockBuffer.getWindowTimestamps.mockReturnValue({
         start: Date.now() - 1000,

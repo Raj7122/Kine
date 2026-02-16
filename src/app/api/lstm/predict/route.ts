@@ -9,19 +9,24 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import * as tf from '@tensorflow/tfjs';
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
+import {
+  LSTM_FEATURE_COUNT,
+  LSTM_WINDOW_SIZE,
+  LSTM_VOCABULARY,
+} from '@/config/constants';
+import { registerAttentionLayer } from '@/lib/lstm/attentionLayer';
 
-// Vocabulary from training - must match model output order
-const VOCABULARY = [
-  'BAD', 'FINISH', 'GOOD', 'GOODBYE', 'HELLO',
-  'HELP', 'HOW', 'I', 'LIKE', 'MAYBE',
-  'NAME', 'NEED', 'NO', 'PLEASE', 'SORRY',
-  'THANK_YOU', 'UNDERSTAND', 'WANT', 'WHAT', 'WHEN',
-  'WHERE', 'WHO', 'WHY', 'YES', 'YOU'
-];
+export const runtime = 'nodejs';
 
-// Model parameters
-const WINDOW_SIZE = 16;  // Frames per prediction
-const FEATURE_COUNT = 63; // 21 landmarks × 3 coords (single hand)
+const MODEL_DIR = path.join(process.cwd(), 'public', 'models', 'asl_cnn_lstm_25');
+const MODEL_JSON_PATH = path.join(MODEL_DIR, 'model.json');
+const METADATA_PATH = path.join(MODEL_DIR, 'metadata.json');
+
+const WINDOW_SIZE = LSTM_WINDOW_SIZE;
+const FEATURE_COUNT = LSTM_FEATURE_COUNT;
 
 interface LSTMPredictRequest {
   landmarks: number[][]; // Shape: [frames, 63]
@@ -31,6 +36,203 @@ interface PredictionResult {
   sign: string;
   confidence: number;
   top3: Array<{ sign: string; confidence: number }>;
+}
+
+type ModelJSON = {
+  format?: string;
+  generatedBy?: string;
+  convertedBy?: string;
+  modelTopology?: unknown;
+  weightsManifest?: Array<{
+    paths?: string[];
+    weights?: tf.io.WeightsManifestEntry[];
+  }>;
+};
+
+type LSTMMetadata = {
+  vocabulary?: string[];
+};
+
+let modelStatePromise: Promise<{ model: tf.LayersModel; vocabulary: string[] }> | null = null;
+
+function resolveOutputTensor(output: unknown): tf.Tensor {
+  if (output instanceof tf.Tensor) {
+    return output;
+  }
+
+  if (Array.isArray(output) && output.length > 0 && output[0] instanceof tf.Tensor) {
+    return output[0];
+  }
+
+  if (output && typeof output === 'object') {
+    const firstTensor = Object.values(output as Record<string, unknown>).find(
+      (value): value is tf.Tensor => value instanceof tf.Tensor
+    );
+    if (firstTensor) {
+      return firstTensor;
+    }
+  }
+
+  throw new Error('Model inference produced no tensor outputs');
+}
+
+function resolveVocabulary(vocabulary: string[], outputSize: number): string[] {
+  if (vocabulary.length === outputSize) {
+    return vocabulary;
+  }
+
+  if (outputSize <= LSTM_VOCABULARY.length) {
+    return [...LSTM_VOCABULARY].slice(0, outputSize);
+  }
+
+  const padded = [...vocabulary];
+  while (padded.length < outputSize) {
+    padded.push(`CLASS_${padded.length}`);
+  }
+  return padded.slice(0, outputSize);
+}
+
+async function readMetadataVocabulary(): Promise<string[]> {
+  try {
+    const raw = await fs.readFile(METADATA_PATH, 'utf-8');
+    const parsed = JSON.parse(raw) as LSTMMetadata;
+    if (Array.isArray(parsed.vocabulary) && parsed.vocabulary.length > 0) {
+      return parsed.vocabulary.map((entry) => String(entry));
+    }
+  } catch {
+    // Fall through to constants vocabulary below
+  }
+  return [...LSTM_VOCABULARY];
+}
+
+async function loadModelFromDisk(): Promise<{ model: tf.LayersModel; vocabulary: string[] }> {
+  registerAttentionLayer(tf);
+
+  const rawModelJson = await fs.readFile(MODEL_JSON_PATH, 'utf-8');
+  const parsed = JSON.parse(rawModelJson) as ModelJSON;
+
+  if (!parsed.modelTopology || !Array.isArray(parsed.weightsManifest)) {
+    throw new Error('Invalid layers model json: missing topology or weights manifest');
+  }
+
+  const shardPaths: string[] = [];
+  const weightSpecs: tf.io.WeightsManifestEntry[] = [];
+
+  for (const group of parsed.weightsManifest) {
+    if (Array.isArray(group.paths)) {
+      shardPaths.push(...group.paths);
+    }
+    if (Array.isArray(group.weights)) {
+      weightSpecs.push(...group.weights);
+    }
+  }
+
+  if (shardPaths.length === 0 || weightSpecs.length === 0) {
+    throw new Error('Invalid layers model json: no weights found');
+  }
+
+  const shardBuffers = await Promise.all(
+    shardPaths.map(async (relativePath) => {
+      const absPath = path.join(MODEL_DIR, relativePath);
+      const file = await fs.readFile(absPath);
+      return new Uint8Array(file);
+    })
+  );
+
+  const totalBytes = shardBuffers.reduce((sum, buf) => sum + buf.byteLength, 0);
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const shard of shardBuffers) {
+    merged.set(shard, offset);
+    offset += shard.byteLength;
+  }
+
+  const modelArtifacts: tf.io.ModelArtifacts = {
+    modelTopology: parsed.modelTopology,
+    format: parsed.format ?? 'layers-model',
+    generatedBy: parsed.generatedBy,
+    convertedBy: parsed.convertedBy,
+    weightSpecs,
+    weightData: merged.buffer.slice(merged.byteOffset, merged.byteOffset + merged.byteLength),
+  };
+
+  const ioHandler: tf.io.IOHandler = {
+    load: async () => modelArtifacts,
+  };
+
+  const model = await tf.loadLayersModel(ioHandler);
+  const vocabulary = await readMetadataVocabulary();
+
+  return { model, vocabulary };
+}
+
+async function getModelState(): Promise<{ model: tf.LayersModel; vocabulary: string[] }> {
+  if (!modelStatePromise) {
+    modelStatePromise = loadModelFromDisk().catch((error) => {
+      modelStatePromise = null;
+      throw error;
+    });
+  }
+
+  return modelStatePromise;
+}
+
+async function predictWithModel(landmarks: number[][]): Promise<PredictionResult> {
+  const { model, vocabulary } = await getModelState();
+
+  const inputTensor = tf.tensor3d([landmarks], [1, WINDOW_SIZE, FEATURE_COUNT], 'float32');
+  let outputContainer: unknown = null;
+  let outputTensor: tf.Tensor | null = null;
+
+  try {
+    outputContainer = model.predict(inputTensor);
+    outputTensor = resolveOutputTensor(outputContainer);
+
+    const probabilitiesArray = await outputTensor.data();
+    const probabilities = Array.from(probabilitiesArray, (v) => Number(v));
+    const activeVocabulary = resolveVocabulary(vocabulary, probabilities.length);
+
+    let bestIndex = 0;
+    let bestConfidence = -1;
+    probabilities.forEach((probability, index) => {
+      if (probability > bestConfidence) {
+        bestConfidence = probability;
+        bestIndex = index;
+      }
+    });
+
+    const ranked = probabilities
+      .map((confidence, index) => ({
+        sign: activeVocabulary[index] ?? `CLASS_${index}`,
+        confidence,
+      }))
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 3);
+
+    return {
+      sign: activeVocabulary[bestIndex] ?? 'UNKNOWN',
+      confidence: bestConfidence,
+      top3: ranked,
+    };
+  } finally {
+    inputTensor.dispose();
+
+    if (Array.isArray(outputContainer)) {
+      outputContainer.forEach((tensor) => {
+        if (tensor instanceof tf.Tensor && tensor !== outputTensor) {
+          tensor.dispose();
+        }
+      });
+    } else if (outputContainer && typeof outputContainer === 'object' && !(outputContainer instanceof tf.Tensor)) {
+      Object.values(outputContainer as Record<string, unknown>).forEach((tensor) => {
+        if (tensor instanceof tf.Tensor && tensor !== outputTensor) {
+          tensor.dispose();
+        }
+      });
+    }
+
+    outputTensor?.dispose();
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -74,10 +276,7 @@ export async function POST(request: NextRequest) {
     // Pad or truncate to window size
     const padded = padOrTruncate(normalized, WINDOW_SIZE);
 
-    // For now, return a mock prediction since TensorFlow model loading
-    // requires additional setup. In production, this would call the model.
-    // TODO: Integrate with @tensorflow/tfjs-node for real predictions
-    const prediction = getMockPrediction(padded);
+    const prediction = await predictWithModel(padded);
 
     return NextResponse.json(prediction);
   } catch (error) {
@@ -176,71 +375,3 @@ function padOrTruncate(landmarks: number[][], targetLength: number): number[][] 
   return [...padding, ...landmarks];
 }
 
-/**
- * Mock prediction based on hand movement patterns.
- * TODO: Replace with actual TensorFlow model inference.
- */
-function getMockPrediction(landmarks: number[][]): PredictionResult {
-  // Calculate simple motion features for mock prediction
-  let totalMotion = 0;
-  let horizontalMotion = 0;
-  let verticalMotion = 0;
-
-  for (let i = 1; i < landmarks.length; i++) {
-    const prevWrist = landmarks[i - 1].slice(0, 3);
-    const currWrist = landmarks[i].slice(0, 3);
-
-    const dx = currWrist[0] - prevWrist[0];
-    const dy = currWrist[1] - prevWrist[1];
-
-    horizontalMotion += Math.abs(dx);
-    verticalMotion += Math.abs(dy);
-    totalMotion += Math.sqrt(dx * dx + dy * dy);
-  }
-
-  // Simple heuristic for mock predictions
-  let predictedIdx = 0;
-  let confidence = 0.5;
-
-  if (totalMotion < 0.5) {
-    // Little movement - static sign
-    const signs = ['YES', 'NO', 'GOOD', 'BAD'];
-    predictedIdx = VOCABULARY.indexOf(signs[Math.floor(Math.random() * signs.length)]);
-    confidence = 0.4 + Math.random() * 0.2;
-  } else if (horizontalMotion > verticalMotion * 1.5) {
-    // Horizontal movement
-    const signs = ['HELLO', 'GOODBYE', 'PLEASE', 'THANK_YOU'];
-    predictedIdx = VOCABULARY.indexOf(signs[Math.floor(Math.random() * signs.length)]);
-    confidence = 0.5 + Math.random() * 0.2;
-  } else if (verticalMotion > horizontalMotion * 1.5) {
-    // Vertical movement
-    const signs = ['HELP', 'WANT', 'NEED', 'UNDERSTAND'];
-    predictedIdx = VOCABULARY.indexOf(signs[Math.floor(Math.random() * signs.length)]);
-    confidence = 0.5 + Math.random() * 0.2;
-  } else {
-    // Mixed movement - question words
-    const signs = ['WHAT', 'WHERE', 'WHO', 'WHEN', 'WHY', 'HOW'];
-    predictedIdx = VOCABULARY.indexOf(signs[Math.floor(Math.random() * signs.length)]);
-    confidence = 0.45 + Math.random() * 0.2;
-  }
-
-  // Generate top 3 predictions
-  const top3Indices = [predictedIdx];
-  while (top3Indices.length < 3) {
-    const randomIdx = Math.floor(Math.random() * VOCABULARY.length);
-    if (!top3Indices.includes(randomIdx)) {
-      top3Indices.push(randomIdx);
-    }
-  }
-
-  const top3 = top3Indices.map((idx, i) => ({
-    sign: VOCABULARY[idx],
-    confidence: i === 0 ? confidence : confidence * (0.5 - i * 0.15)
-  }));
-
-  return {
-    sign: VOCABULARY[predictedIdx],
-    confidence,
-    top3
-  };
-}

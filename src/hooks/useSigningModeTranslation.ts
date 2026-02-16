@@ -13,14 +13,16 @@ import {
 } from '@/lib/sign-recognition/shared';
 import { recognizeSignWithGemini } from '@/lib/sign-recognition/geminiClient';
 import { synthesizeSpeech, playAudioBlob } from '@/lib/elevenlabs';
-import { saveMessage, generateSessionId } from '@/lib/supabase';
+import { saveMessage } from '@/lib/supabase';
 import type { SignRecognizeResult } from '@/lib/sign-recognition/types';
+import { useAppStore } from '@/store/useAppStore';
 import {
   SILENCE_TRIGGER_THRESHOLD,
   DYNAMIC_MODE_STILLNESS_THRESHOLD,
   DYNAMIC_MODE_BUFFER_THRESHOLD,
   MAX_BUFFER_SIZE,
   LSTM_CONFIDENCE_THRESHOLD,
+  LSTM_SHORTCIRCUIT_THRESHOLD,
 } from '@/config/constants';
 import { useLSTMDetection, type UseLSTMDetectionReturn } from './useLSTMDetection';
 import type { LSTMPrediction } from '@/lib/lstm';
@@ -39,12 +41,27 @@ export interface TranslationResult {
   recognition: SignRecognizeResult;
   gloss: string[];
   category: string;
-  source: 'gesture' | 'openai' | 'openai-vision' | 'gemini' | 'gemini-vision';
+  source: SignRecognizeResult['source'];
   lstmHint?: string | null;
 }
 
 // Minimum confidence for gesture-based recognition
 const GESTURE_CONFIDENCE_THRESHOLD = 0.75;
+
+export function getLSTMShortCircuitPrediction(
+  prediction: LSTMPrediction | null,
+  threshold: number = LSTM_SHORTCIRCUIT_THRESHOLD
+): { text: string; originalText: string; confidence: number } | null {
+  if (!prediction || prediction.confidence < threshold) {
+    return null;
+  }
+
+  return {
+    text: prediction.class.replace(/_/g, ' '),
+    originalText: prediction.class,
+    confidence: prediction.confidence,
+  };
+}
 
 export interface UseSigningModeTranslationReturn {
   // Translation state
@@ -78,9 +95,6 @@ export interface UseSigningModeTranslationReturn {
   isDynamicModeActive: boolean;
 }
 
-// Session ID for message tracking
-let sessionId: string | null = null;
-
 // Video frame capture interval
 const VIDEO_CAPTURE_INTERVAL = 4;
 
@@ -97,6 +111,8 @@ const VIDEO_CAPTURE_INTERVAL = 4;
 export function useSigningModeTranslation(
   onTranslationComplete?: (translation: TranslationResult) => void
 ): UseSigningModeTranslationReturn {
+  const sessionId = useAppStore((state) => state.sessionId);
+
   // Translation state
   const [state, setState] = useState<TranslationState>('idle');
   const [translation, setTranslation] = useState<TranslationResult | null>(null);
@@ -115,7 +131,7 @@ export function useSigningModeTranslation(
 
   // LSTM detection hook
   const lstmDetection = useLSTMDetection({
-    autoLoad: false,
+    autoLoad: true,
     onPrediction: (prediction) => {
       console.log(
         `[SigningModeTranslation] LSTM prediction: ${prediction.class} (${(prediction.confidence * 100).toFixed(1)}%)`
@@ -140,11 +156,20 @@ export function useSigningModeTranslation(
     lstmDetectionRef.current = lstmDetection;
   }, [lstmDetection]);
 
-  // Initialize session ID
-  if (!sessionId) {
-    sessionId = generateSessionId();
-    console.log('[SigningModeTranslation] Session ID:', sessionId);
-  }
+  useEffect(() => {
+    if (sessionId) {
+      console.log('[SigningModeTranslation] Session ID:', sessionId);
+    }
+  }, [sessionId]);
+
+  // Auto-enable LSTM once the model has loaded so dynamic detection starts immediately.
+  useEffect(() => {
+    if (!lstmDetection.isModelLoaded || lstmDetection.isEnabled) {
+      return;
+    }
+
+    void lstmDetection.enable();
+  }, [lstmDetection.isEnabled, lstmDetection.isModelLoaded, lstmDetection.enable]);
 
   // Track video element availability for independent capture
   const [hasVideoElement, setHasVideoElement] = useState(false);
@@ -227,42 +252,55 @@ export function useSigningModeTranslation(
         console.log('[SigningModeTranslation] Gesture hint for Gemini:', gestureHint);
       }
 
-      // Step 1: Always use Gemini for maximum accuracy (gesture is just a hint, never short-circuits)
+      // Step 1: Prefer fast local LSTM for high-confidence dynamic signs.
+      // Fall back to Gemini arbitration when LSTM is uncertain.
       if (landmarkBufferRef.current.length > 5) {
-        console.log('[SigningModeTranslation] Step 1: Gemini Sign Recognition');
-        if (lstmHint) {
-          console.log('[SigningModeTranslation] LSTM hint:', lstmHint);
-        }
-
-        console.log('[SigningModeTranslation] Sending to Gemini:', {
-          landmarkFrames: landmarkBufferRef.current.length,
-          videoFrames: videoFrameBufferRef.current.length,
-        });
-
-        // Combine LSTM + gesture hints for Gemini context
-        const combinedHint = [lstmHint, gestureHint].filter(Boolean).join('. ') || null;
-
-        const geminiResult = await recognizeSignWithGemini(
-          landmarkBufferRef.current,
-          videoFrameBufferRef.current,
-          { sessionId: sessionId ?? undefined, lstmHint: combinedHint }
-        );
-        recognizedText = geminiResult.text;
-        recognitionSource = geminiResult.source;
-        recognitionConfidence = geminiResult.confidence;
-        recognizedOriginalText = geminiResult.originalText;
-        recognizedCorrected = geminiResult.corrected;
-        recognizedSampleId = geminiResult.sampleId;
-
-        if (recognizedCorrected) {
-          console.log('[SigningModeTranslation] Server applied correction:', geminiResult.originalText, '->', geminiResult.text);
-        }
-
-        if (!geminiResult.text) {
-          console.log('[SigningModeTranslation] Unclear gesture - skipping audio');
-          recognizedText = '';
+        const shortCircuit = getLSTMShortCircuitPrediction(lstmDetectionRef.current.lastPrediction);
+        if (shortCircuit) {
+          recognizedText = shortCircuit.text;
+          recognizedOriginalText = shortCircuit.originalText;
+          recognitionSource = 'lstm';
+          recognitionConfidence = shortCircuit.confidence;
+          console.log(
+            '[SigningModeTranslation] LSTM short-circuit:',
+            `${shortCircuit.originalText} (${(shortCircuit.confidence * 100).toFixed(1)}%)`
+          );
         } else {
-          console.log('[SigningModeTranslation] Recognized:', recognizedText, '(source:', geminiResult.source, ')');
+          console.log('[SigningModeTranslation] Step 1: Gemini Sign Recognition');
+          if (lstmHint) {
+            console.log('[SigningModeTranslation] LSTM hint:', lstmHint);
+          }
+
+          console.log('[SigningModeTranslation] Sending to Gemini:', {
+            landmarkFrames: landmarkBufferRef.current.length,
+            videoFrames: videoFrameBufferRef.current.length,
+          });
+
+          // Combine LSTM + gesture hints for Gemini context
+          const combinedHint = [lstmHint, gestureHint].filter(Boolean).join('. ') || null;
+
+          const geminiResult = await recognizeSignWithGemini(
+            landmarkBufferRef.current,
+            videoFrameBufferRef.current,
+            { sessionId: sessionId ?? undefined, lstmHint: combinedHint }
+          );
+          recognizedText = geminiResult.text;
+          recognitionSource = geminiResult.source;
+          recognitionConfidence = geminiResult.confidence;
+          recognizedOriginalText = geminiResult.originalText;
+          recognizedCorrected = geminiResult.corrected;
+          recognizedSampleId = geminiResult.sampleId;
+
+          if (recognizedCorrected) {
+            console.log('[SigningModeTranslation] Server applied correction:', geminiResult.originalText, '->', geminiResult.text);
+          }
+
+          if (!geminiResult.text) {
+            console.log('[SigningModeTranslation] Unclear gesture - skipping audio');
+            recognizedText = '';
+          } else {
+            console.log('[SigningModeTranslation] Recognized:', recognizedText, '(source:', geminiResult.source, ')');
+          }
         }
       } else {
         // Not enough frames captured
@@ -370,7 +408,7 @@ export function useSigningModeTranslation(
     } finally {
       isProcessingRef.current = false;
     }
-  }, [onTranslationComplete, getLSTMHint]);
+  }, [onTranslationComplete, getLSTMHint, sessionId]);
 
   /**
    * Process incoming landmark data with LSTM-aware dynamic threshold
