@@ -482,6 +482,165 @@
 
 ---
 
+## 2026-03-04 — Latency Quick Wins: Sign-to-Response Speed Optimization
+
+- **Goal**: Reduce sign recognition pipeline latency from ~4-8s to ~2-4s (Gemini path) and fix post-first-sign stalling caused by a double-lock mechanism.
+- **Root Cause of Stalling**: `isProcessingRef` blocked input during the entire sequential chain (API + TTS + audio playback + gloss = 2-10s), then `completeCooldownRef` blocked for another 4s. Combined with a blob URL memory leak degrading performance over time, this created a 6-14 second dead zone between signs.
+
+### Changes Made
+1. **Fix 7 — Blob URL memory leak** (`src/lib/elevenlabs/clientService.ts`): Removed eager `URL.createObjectURL` in `synthesizeSpeech()` — callers (`playAudioBlob`) create and revoke their own URLs. Prevents progressive memory buildup.
+2. **Fix 8 — Unlock input on hands return** (`src/hooks/useSigningModeTranslation.ts`): Added `completedAtRef` timestamp tracking. When hands are detected during cooldown and ≥500ms have elapsed since result display, immediately unlock input instead of waiting for full cooldown timer.
+3. **Fix 1+2 — Parallelize TTS + gloss, background audio** (`src/hooks/useSigningModeTranslation.ts`): TTS synthesis runs as fire-and-forget (audio plays in background without blocking). Gloss translation runs concurrently. Saves 1-4s.
+4. **Fix 4 — Reduce display cooldown** (`src/components/views/SigningView.tsx`): 4000ms → 2000ms. Combined with Fix 8, users can start signing the next word even sooner.
+5. **Fix 3 — Reduce silence threshold** (`src/config/constants.ts`): `SILENCE_TRIGGER_THRESHOLD` 1500ms → 800ms. Dynamic mode threshold (1000ms) still applies when LSTM detects motion.
+6. **Fix 5 — Fire-and-forget Supabase persistence** (`src/app/api/sign-recognize/route.ts`): Generate `sampleId` synchronously, kick off `persistSignRecognitionSample` in background with `.catch()` handler. Saves 50-300ms on critical path.
+7. **Fix 6 — Reduce video frames** (`src/config/constants.ts`): `SIGN_RECOGNITION_FRAME_COUNT` 10 → 8 (conservative first step; landmark data still carries full motion).
+
+### Projected Impact
+| Path | Before | After |
+|------|--------|-------|
+| Gemini full pipeline | ~4-8s | ~2-4s |
+| LSTM short-circuit | ~1.5-2s | ~0.8-1.2s |
+| Between-sign gap | ~6-14s | ~2-3s |
+| Memory stability | Degrades over time | Stable |
+
+- **Tests**: 385 unit tests passing, 7 E2E tests passing.
+- **Files Modified**: `src/lib/elevenlabs/clientService.ts`, `src/hooks/useSigningModeTranslation.ts`, `src/components/views/SigningView.tsx`, `src/config/constants.ts`, `src/app/api/sign-recognize/route.ts`
+
+---
+
+## 2026-03-04 — LSTM Misclassification Diagnosis & Threshold Fix
+
+- **Problem**: LSTM model was short-circuiting Gemini with wrong sign predictions. Console logs showed confident but incorrect LSTM predictions bypassing the more accurate Gemini vision path.
+- **Root Cause**: The CNN-LSTM model (trained Feb 15) is severely overfitting — train accuracy 90% vs val accuracy 72.9%. The validation loss *increased* from epoch 5 while training loss kept dropping. The dataset is also massively imbalanced (4–25 raw samples per sign) with only 67 successful WLASL video extractions supplementing 19 Kaggle signs. Per-class test accuracy: MEET 0%, UNDERSTAND 18%, NAME 33%, WHAT 33%.
+
+### Changes Made
+1. **Fix A — Raise LSTM thresholds** (`src/config/constants.ts`):
+   - `LSTM_CONFIDENCE_THRESHOLD`: 0.70 → 0.80 (hint threshold)
+   - `LSTM_SHORTCIRCUIT_THRESHOLD`: 0.85 → 0.95 (bypass-Gemini threshold)
+   - Effect: Far fewer wrong short-circuits. More requests fall through to Gemini.
+2. **Fix B — LSTM diagnostic logging** (`src/hooks/useSigningModeTranslation.ts`): Added top-3 prediction logging with confidences before the short-circuit decision. Console now shows: `LSTM top-3: [HELLO:92.3%, PLEASE:4.1%, YES:1.8%] (threshold: short-circuit≥95%, hint≥80%)`.
+3. **Fix C — Confusion matrix evaluation script** (`scripts/lstm_training/evaluate.py`): New Python script that loads test data, runs inference, and generates per-class precision/recall/F1, confusion matrix, and most-confused pairs. Also saves `evaluation_report.json`.
+
+### Evaluation Results (257 test samples, 29 signs)
+- **Overall test accuracy**: 80.2%
+- **Good signs (F1≥0.7)**: 20 of 29
+- **Critical signs (F1<0.3)**: WHAT (F1=0.25), MEET (F1=0.00)
+- **Weak signs (F1 0.3–0.5)**: UNDERSTAND (F1=0.31)
+- **Top confused pairs**: UNDERSTAND→GOODBYE (63.6%), WHAT→HELP (66.7%), MEET→WHEN (50%)
+- **Recommended**: Prune WHAT and MEET from LSTM vocabulary; gather more data for UNDERSTAND
+
+### Next Steps (Phase 2 — Remediation)
+1. Prune vocabulary to reliable signs only (remove F1<0.3)
+2. Balance dataset with heavier augmentation for underrepresented signs
+3. Fix train/val split (107 val samples is too small)
+4. Verify handedness alignment between Kaggle data and browser MediaPipe
+5. Retrain with stronger regularization (target: val accuracy ≥80%, per-class F1 ≥60%)
+
+- **Tests**: 385 unit tests passing.
+- **Files Modified**: `src/config/constants.ts`, `src/hooks/useSigningModeTranslation.ts`
+- **Files Created**: `scripts/lstm_training/evaluate.py`
+
+---
+
+## 2026-03-04 — LSTM Pipeline Silencing & Gemini Payload Reduction
+
+- **Goal**: Fully disable the broken LSTM pipeline to eliminate its negative impact on recognition, and reduce landmark/video payloads to prevent Gemini API timeouts.
+
+### Problem Summary
+1. **LSTM model is confidently wrong**: Predicts DRINK/FOOD at 98%+ confidence for every sign. Even with short-circuit disabled (threshold=2.0) and hints disabled (returns null), the model still loaded (~97MB download), ran TF.js inference every ~400ms, and influenced dynamic mode timing via `hasPendingDynamicSign()`.
+2. **Gemini timeouts on large payloads**: Landmark buffers of 60+ frames produced ~30KB of prompt text, causing Gemini responses to exceed the 15s timeout. Diagnostic data showed: 16-30 landmarks → 3-4s (fast), 37-42 → 8-13s (slow), 70+ → always timed out.
+3. **Learned corrections table poisoned**: The `learned_corrections` Supabase table contained mappings from the broken LSTM era (e.g., "Thank you" → "MY", "Hello" → "FINISH") that were overriding Gemini's correct outputs.
+
+### Changes Made
+
+#### Part 1: LSTM Pipeline Silenced via Feature Flag
+- **`src/config/constants.ts`**: Added `LSTM_ENABLED = false` master kill-switch. When false: no model download, no TF.js import, no inference, no dynamic-mode influence. All LSTM code stays intact — set back to `true` after retraining.
+- **`src/hooks/useSigningModeTranslation.ts`**:
+  - `useLSTMDetection({ autoLoad: LSTM_ENABLED })` — model won't load when flag is false.
+  - Auto-enable `useEffect` gates on `LSTM_ENABLED` — no auto-start.
+  - `processLandmarks()` call gates on `LSTM_ENABLED` — no inference.
+  - `getLSTMHint()` returns `null` immediately when `LSTM_ENABLED` is false. Restored original hint logic behind the flag for future reactivation.
+- **Impact**: ~97MB model download eliminated, WebGL/CPU tensor inference eliminated, TF.js dynamic import skipped entirely. `hasPendingDynamicSign()` returns false → standard 800ms silence threshold used (down from 1000ms dynamic mode, acceptable since LSTM wasn't providing useful detection).
+- **What still works**: DebugOverlay shows `lstmEnabled: false` (informative), DiagnosticPanel works (no LSTM events logged), `enableLSTM()`/`disableLSTM()` actions preserved, all 4 LSTM test files pass (they mock the module).
+
+#### Why LSTM Is Not Being Used
+The CNN-LSTM model (trained 2026-02-15) suffers from severe overfitting:
+- **Train accuracy**: 90% vs **validation accuracy**: 72.9%
+- Validation loss *increased* from epoch 5 while training loss kept dropping
+- Dataset massively imbalanced: 4–25 raw samples per sign, only 67 WLASL video extractions supplementing 19 Kaggle signs
+- **Per-class failures**: MEET 0% accuracy, UNDERSTAND 18%, NAME 33%, WHAT 33%
+- **Top confused pairs**: UNDERSTAND→GOODBYE (63.6%), WHAT→HELP (66.7%), MEET→WHEN (50%)
+- In production, the model predicted DRINK or FOOD at 98%+ confidence for virtually every input sign
+
+The model cannot be fixed without retraining. Prerequisites for re-enablement:
+1. Clean and balance the training dataset (minimum 50 samples per sign)
+2. Fix train/val split (107 val samples is too small)
+3. Verify handedness alignment between Kaggle data and browser MediaPipe
+4. Retrain with stronger regularization (target: val accuracy ≥85%, per-class F1 ≥60%)
+5. Set `LSTM_ENABLED = true` in `constants.ts`
+
+#### Part 2: Landmark & Video Buffer Reduction
+
+| Setting | Before | After | Rationale |
+|---------|--------|-------|-----------|
+| `MAX_BUFFER_SIZE` | 120 frames (~4s) | **60 frames (~2s)** | Reduced accumulation cap; 2s is ample for single signs |
+| `SIGN_RECOGNITION_MAX_LANDMARKS` | 60 | **30** | Diagnostic data: 30 frames → 3-4s response (well under 15s timeout) |
+| Video frame buffer cap | 60 | **24** | Only 8 frames sampled for Gemini; 3× headroom is sufficient |
+
+- **`src/config/constants.ts`**: Reduced `MAX_BUFFER_SIZE` (120→60) and `SIGN_RECOGNITION_MAX_LANDMARKS` (60→30).
+- **`src/hooks/useSigningModeTranslation.ts`**: Reduced both video buffer caps (independent capture interval and per-landmark capture) from 60→24.
+- **Payload chain**: Raw buffer (up to 60 landmarks) → `geminiClient.ts` trims to 30 → server `formatLandmarksForPrompt` samples 30 → ~15KB prompt text. Video: 24 buffered → 16 sent to API → 8 sampled server-side → ~120KB images. Total: ~135KB (down from ~250KB+).
+
+#### Part 3: Learned Corrections Bypass Formalized
+- **`src/lib/sign-recognition/learnedCorrections.ts`**: Added `TODO` marker and re-enablement instructions to the bypassed `applyRuntimeLearnedCorrections()`. All 108 rows preserved in Supabase — no data deleted. Will re-enable after reviewing/cleaning the table.
+
+#### Part 4: DiagnosticPanel Crash Prevention
+- **`src/components/ui/DiagnosticPanel.tsx`**: Wrapped `JSON.stringify(entry.data)` in try-catch returning `'[unserializable]'` on failure, preventing panel crash on circular or non-serializable diagnostic data.
+
+### Live Test Results (2026-03-04 17:13–17:15)
+
+| Sign | Landmarks Sent | Gemini Time | Result |
+|------|---------------|-------------|--------|
+| Hello | 26 | 4575ms | ✅ "Hello" |
+| Sorry | 16 | 4216ms | ✅ "SORRY" |
+| Please | 55 (30 after trim) | 7347ms | ✅ "PLEASE" (retry after initial timeout) |
+| W | 29 | 5162ms | ✅ "W" |
+| Thank You | 33 (30 after trim) | 4770ms | ✅ "THANK-YOU" |
+| Understand | 32 (30 after trim) | 4348ms | ✅ "UNDERSTAND" |
+
+- Average response time: ~5.1s (down from 8-13s + frequent timeouts)
+- One transient 503 and one timeout on first attempt — both succeeded on retry
+- LSTM: zero events logged, zero model download, zero CPU overhead
+
+### Updated Architecture
+
+```
+Client Pipeline (LSTM_ENABLED=false):
+  Camera → MediaPipe Landmarks + Video Frames
+       → Landmark buffer (max 60 frames, trimmed to 30 for API)
+       → Video buffer (max 24 frames, 8 sampled for Gemini)
+       → Silence detection (800ms standard threshold)
+       → POST /api/sign-recognize
+       → No LSTM model loaded, no inference, no dynamic mode
+
+Server Pipeline:
+  /api/sign-recognize:
+    1. Validate + Rate Limit (15 req/min)
+    2. Persist sample (fire-and-forget)
+    3. Build augmented prompt (confusion-pair format)
+    4. Format 30 landmark frames (~15KB text)
+    5. Sample 8 video frames (~120KB images)
+    6. Call Gemini 3.0 Flash (timeout: 15s)
+    7. Runtime corrections: BYPASSED (learned_corrections poisoned)
+    8. Return SignRecognizeResult
+```
+
+- **Tests**: 19 files, 385 tests passing. No regressions.
+- **Files Modified**: `src/config/constants.ts`, `src/hooks/useSigningModeTranslation.ts`, `src/lib/sign-recognition/learnedCorrections.ts`, `src/components/ui/DiagnosticPanel.tsx`
+
+---
+
 ## Future Work
 
 - **Decay/recency weighting**: Older corrections should carry less weight than recent ones. Proposed approach: `effectiveCount = occurrenceCount * decayFactor` where `decayFactor = max(0.1, 1 - daysSinceLastSeen / 90)`. Deferred to a later date.

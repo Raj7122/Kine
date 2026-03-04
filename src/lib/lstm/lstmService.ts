@@ -17,6 +17,7 @@ import {
   LSTM_VOCABULARY,
   type LSTMSignClass,
 } from '@/config/constants';
+import { dlog } from '@/lib/diagnostics/diagnosticLog';
 
 type TFTensorLike = {
   data: () => Promise<ArrayLike<number>>;
@@ -107,9 +108,11 @@ async function initTensorFlow(): Promise<typeof import('@tensorflow/tfjs')> {
     await tfjs.setBackend('webgl');
     await tfjs.ready();
     console.log('[LSTM] TensorFlow.js initialized with WebGL backend');
+    dlog('lstm', 'TF.js initialized (WebGL)');
   } catch {
     // Fall back to CPU if WebGL unavailable
     console.warn('[LSTM] WebGL unavailable, falling back to CPU backend');
+    dlog('lstm', 'WebGL unavailable, using CPU');
     await tfjs.setBackend('cpu');
     await tfjs.ready();
   }
@@ -152,11 +155,13 @@ export async function loadModel(): Promise<boolean> {
 
     useAPIFallback = false;
     console.log('[LSTM] Model loaded and ready');
+    dlog('lstm', 'Model loaded and ready');
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.warn('[LSTM] Failed to load browser model:', message);
     console.log('[LSTM] Switching to API fallback mode');
+    dlog('error', `LSTM model load failed: ${message} — using API fallback`);
     useAPIFallback = true;
     loadError = null; // Clear error since we have a fallback
     return true; // Return true since API fallback is available
@@ -236,9 +241,17 @@ export async function predictSign(
       `[LSTM] Prediction: ${predictedClass} (${(maxProb * 100).toFixed(1)}%)`
     );
 
+    // Diagnostic: top-3 for in-app panel
+    const top3 = Object.entries(allProbabilities)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3)
+      .map(([s, p]) => `${s}:${(p * 100).toFixed(1)}%`);
+    dlog('lstm', `Pred: ${predictedClass} (${(maxProb * 100).toFixed(1)}%) | top3: ${top3.join(', ')}`);
+
     return prediction;
   } catch (error) {
     console.error('[LSTM] Inference error:', error);
+    dlog('error', `LSTM inference: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }

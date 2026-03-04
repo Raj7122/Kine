@@ -65,15 +65,15 @@ export const HAND_LANDMARK_NAMES = [
 
 /**
  * Capture a video frame as base64 image.
- * Caps resolution to 640×480 for efficient payload sizes (~30-60 KB per frame).
+ * Caps resolution to 320×240 at JPEG q=0.5 for efficient payload sizes (~10-20 KB per frame).
  */
 export function captureVideoFrame(video: HTMLVideoElement): VideoFrame | null {
   if (!video || video.readyState < 2) return null;
 
   try {
     const canvas = document.createElement('canvas');
-    const maxWidth = 640;
-    const maxHeight = 480;
+    const maxWidth = 320;
+    const maxHeight = 240;
     const scale = Math.min(1, maxWidth / video.videoWidth, maxHeight / video.videoHeight);
     canvas.width = video.videoWidth * scale;
     canvas.height = video.videoHeight * scale;
@@ -86,7 +86,7 @@ export function captureVideoFrame(video: HTMLVideoElement): VideoFrame | null {
     ctx.scale(-1, 1);
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
 
     return {
       dataUrl,

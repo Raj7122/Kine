@@ -6,6 +6,7 @@
 
 import type { SignLandmarkData, VideoFrame } from './shared';
 import type { SignRecognizeResult } from './types';
+import { SIGN_RECOGNITION_FRAME_COUNT, SIGN_RECOGNITION_MAX_LANDMARKS } from '@/config/constants';
 
 export interface GeminiRecognitionOptions {
   sessionId?: string;
@@ -28,8 +29,8 @@ export async function recognizeSignWithGemini(
   const {
     sessionId,
     lstmHint,
-    maxLandmarkFrames = 60,
-    maxVideoFrames = 20,
+    maxLandmarkFrames = SIGN_RECOGNITION_MAX_LANDMARKS,
+    maxVideoFrames = SIGN_RECOGNITION_FRAME_COUNT * 2,
   } = options;
 
   const trimmedFrames = frames.slice(-maxLandmarkFrames);

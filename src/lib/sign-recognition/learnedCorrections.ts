@@ -253,8 +253,13 @@ export function applyRuntimeCorrectionFromMap(
 }
 
 export async function applyRuntimeLearnedCorrections(originalText: string): Promise<RuntimeCorrectionResult> {
-  const map = await getRuntimeCorrectionsMap();
-  return applyRuntimeCorrectionFromMap(originalText, map);
+  // TODO: Re-enable after cleaning the learned_corrections Supabase table.
+  // DISABLED — table contains entries from the broken LSTM era
+  // (e.g. "Thank you" → "MY", "Hello" → "FINISH") that override Gemini's correct answers.
+  // To re-enable: uncomment the two lines below and delete the early return.
+  // const map = await getRuntimeCorrectionsMap();
+  // return applyRuntimeCorrectionFromMap(originalText, map);
+  return { text: originalText, originalText, corrected: false };
 }
 
 export function clearRuntimeCorrectionsCacheForTests() {

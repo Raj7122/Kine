@@ -50,13 +50,14 @@ export const ROBOFLOW_HIGH_ACCURACY_SIZE = 1280; // High-accuracy mode input siz
 // Translation Settings
 // =============================================================================
 
-export const SILENCE_TRIGGER_THRESHOLD = 1500; // ms of no motion to trigger translation (longer for phrases)
-export const MAX_BUFFER_SIZE = 120; // max frames to buffer (4 sec at 30 FPS)
+export const SILENCE_TRIGGER_THRESHOLD = 800; // ms of no motion to trigger translation
+export const SIGNING_RESULT_MIN_DISPLAY_MS = 500; // ms minimum result display before accepting new input
+export const MAX_BUFFER_SIZE = 60; // max frames to buffer (~2s at 30 FPS; reduced from 120 to cut Gemini payload)
 export const MIN_PHRASE_FRAMES = 25; // minimum frames needed to consider a phrase (vs single sign)
 
 // Sign recognition settings
-export const SIGN_RECOGNITION_FRAME_COUNT = 10; // number of video frames to send to Gemini (more for motion signs)
-export const SIGN_RECOGNITION_MAX_LANDMARKS = 60; // max landmark frames to send
+export const SIGN_RECOGNITION_FRAME_COUNT = 8; // video frames for Gemini (8 needed for motion-direction signs like THANK YOU vs HELLO; 320×240 JPEG q=0.5)
+export const SIGN_RECOGNITION_MAX_LANDMARKS = 30; // max landmark frames to send (reduced from 60 — 60+ frames caused Gemini timeouts >15s)
 
 // =============================================================================
 // Avatar & UI
@@ -73,11 +74,18 @@ export const TRANSITION_DURATION = 0.3; // seconds for view transitions
 // LSTM Dynamic Gesture Recognition (Research-Grade CNN-LSTM Architecture)
 // =============================================================================
 
+// LSTM_ENABLED: Master kill-switch for the LSTM pipeline.
+// Set to false because the current model is confidently wrong (predicts DRINK/FOOD
+// at 98%+ for every sign). When false: no model download (~97MB saved), no TF.js
+// import, no inference, no dynamic-mode influence. All LSTM code stays intact —
+// set back to true after retraining the model with a cleaned dataset.
+export const LSTM_ENABLED = false;
+
 export const LSTM_WINDOW_SIZE = 16;           // frames (~530ms at 30fps - research optimal)
 export const LSTM_STRIDE = 8;                 // 50% overlap for dense inference
 export const LSTM_MIN_MOTION_FRAMES = 4;      // reduced for smaller window
-export const LSTM_CONFIDENCE_THRESHOLD = 0.7; // prediction threshold
-export const LSTM_SHORTCIRCUIT_THRESHOLD = 0.85; // skip Gemini when LSTM is highly confident
+export const LSTM_CONFIDENCE_THRESHOLD = 0.8; // prediction threshold for hint to Gemini (raised from 0.7 — model overfits)
+export const LSTM_SHORTCIRCUIT_THRESHOLD = 2.0; // DISABLED — model is confidently wrong (DRINK/FOOD 98%+ for HELLO). Restore to 0.95 after retraining.
 export const LSTM_MODEL_PATH = '/models/asl_cnn_lstm_25.json';
 export const LSTM_FEATURE_COUNT = 63;         // 21 landmarks × 3 coords × 1 dominant hand
 

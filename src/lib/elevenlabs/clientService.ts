@@ -91,16 +91,16 @@ export async function synthesizeSpeech(
       };
     }
 
-    // Get the audio blob
+    // Get the audio blob (don't create objectURL eagerly — callers should
+    // create and revoke their own URLs to avoid memory leaks)
     const audioBlob = await response.blob();
-    const audioUrl = URL.createObjectURL(audioBlob);
 
     console.log('[SpeechClient] Audio generated, size:', audioBlob.size, 'bytes');
 
     return {
       success: true,
       audioBlob,
-      audioUrl,
+      audioUrl: null,
     };
   } catch (error) {
     console.error('[SpeechClient] Error:', error);

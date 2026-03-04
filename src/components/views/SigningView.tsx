@@ -8,6 +8,7 @@ import { TopBar } from '@/components/ui/TopBar';
 import { CameraFeed } from '@/components/camera/CameraFeed';
 import { HandTracker } from '@/components/camera/HandTracker';
 import { DebugOverlay } from '@/components/ui/DebugOverlay';
+import { DiagnosticPanel } from '@/components/ui/DiagnosticPanel';
 import { TRANSITION_DURATION } from '@/config/constants';
 import type { LandmarkResult } from '@/lib/mediapipe';
 import { useSigningModeTranslation, type TranslationState } from '@/hooks/useSigningModeTranslation';
@@ -60,7 +61,7 @@ export function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
       const timeout = setTimeout(() => {
         resetTranslation();
         console.log('[SigningView] Ready for next sign');
-      }, 4000);
+      }, 2000);
       return () => clearTimeout(timeout);
     }
     // Auto-clear error state after cooldown so user can retry
@@ -137,6 +138,9 @@ export function SigningView({ onSettingsClick, onHistoryClick }: ViewProps) {
         videoFrameBufferSize={videoFrameBufferSize}
         isVisible={showDebug}
       />
+
+      {/* Diagnostic Log Panel - in-app pipeline log */}
+      <DiagnosticPanel isVisible={showDebug} />
 
       {/* Debug Toggle Button */}
       <button

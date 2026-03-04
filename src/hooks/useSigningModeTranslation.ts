@@ -16,13 +16,16 @@ import { synthesizeSpeech, playAudioBlob } from '@/lib/elevenlabs';
 import { saveMessage } from '@/lib/supabase';
 import type { SignRecognizeResult } from '@/lib/sign-recognition/types';
 import { useAppStore } from '@/store/useAppStore';
+import { dlog } from '@/lib/diagnostics/diagnosticLog';
 import {
   SILENCE_TRIGGER_THRESHOLD,
+  SIGNING_RESULT_MIN_DISPLAY_MS,
   DYNAMIC_MODE_STILLNESS_THRESHOLD,
   DYNAMIC_MODE_BUFFER_THRESHOLD,
   MAX_BUFFER_SIZE,
   LSTM_CONFIDENCE_THRESHOLD,
   LSTM_SHORTCIRCUIT_THRESHOLD,
+  LSTM_ENABLED,
 } from '@/config/constants';
 import { useLSTMDetection, type UseLSTMDetectionReturn } from './useLSTMDetection';
 import type { LSTMPrediction } from '@/lib/lstm';
@@ -131,7 +134,7 @@ export function useSigningModeTranslation(
 
   // LSTM detection hook
   const lstmDetection = useLSTMDetection({
-    autoLoad: true,
+    autoLoad: LSTM_ENABLED,
     onPrediction: (prediction) => {
       console.log(
         `[SigningModeTranslation] LSTM prediction: ${prediction.class} (${(prediction.confidence * 100).toFixed(1)}%)`
@@ -145,6 +148,7 @@ export function useSigningModeTranslation(
   const handsLostTimeRef = useRef<number | null>(null); // Track when hands left frame
   const isProcessingRef = useRef(false);
   const completeCooldownRef = useRef(false); // Prevents state changes during result display
+  const completedAtRef = useRef<number>(0); // Timestamp when result was displayed
   const landmarkBufferRef = useRef<SignLandmarkData[]>([]);
   const videoFrameBufferRef = useRef<VideoFrame[]>([]);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -164,6 +168,7 @@ export function useSigningModeTranslation(
 
   // Auto-enable LSTM once the model has loaded so dynamic detection starts immediately.
   useEffect(() => {
+    if (!LSTM_ENABLED) return;
     if (!lstmDetection.isModelLoaded || lstmDetection.isEnabled) {
       return;
     }
@@ -195,9 +200,9 @@ export function useSigningModeTranslation(
       const videoFrame = captureVideoFrame(videoElementRef.current);
       if (videoFrame) {
         videoFrameBufferRef.current.push(videoFrame);
-        // Keep buffer at reasonable size
-        if (videoFrameBufferRef.current.length > 60) {
-          videoFrameBufferRef.current = videoFrameBufferRef.current.slice(-60);
+        // Keep frames for temporal context (up to 24; only 8 sampled for Gemini)
+        if (videoFrameBufferRef.current.length > 24) {
+          videoFrameBufferRef.current = videoFrameBufferRef.current.slice(-24);
         }
         setVideoFrameBufferSize(videoFrameBufferRef.current.length);
       }
@@ -210,6 +215,7 @@ export function useSigningModeTranslation(
    * Get LSTM hint for Gemini sign recognition
    */
   const getLSTMHint = useCallback((): string | null => {
+    if (!LSTM_ENABLED) return null;
     const pred = lstmDetectionRef.current.lastPrediction;
     if (pred && pred.confidence >= LSTM_CONFIDENCE_THRESHOLD) {
       return `LSTM detected dynamic sign: ${pred.class} (${(pred.confidence * 100).toFixed(0)}% confidence)`;
@@ -255,6 +261,19 @@ export function useSigningModeTranslation(
       // Step 1: Prefer fast local LSTM for high-confidence dynamic signs.
       // Fall back to Gemini arbitration when LSTM is uncertain.
       if (landmarkBufferRef.current.length > 5) {
+        // Diagnostic: log top-3 LSTM predictions before short-circuit decision
+        const lstmPred = lstmDetectionRef.current.lastPrediction;
+        if (lstmPred?.allProbabilities) {
+          const top3 = Object.entries(lstmPred.allProbabilities)
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, 3)
+            .map(([sign, prob]) => `${sign}:${(prob * 100).toFixed(1)}%`);
+          console.log(`[SigningModeTranslation] LSTM top-3: [${top3.join(', ')}] (threshold: short-circuit≥95%, hint≥80%)`);
+          dlog('pipeline', `LSTM top-3: ${top3.join(', ')}  (sc≥95% hint≥80%)`);
+        } else {
+          dlog('pipeline', 'No LSTM prediction available at trigger time');
+        }
+
         const shortCircuit = getLSTMShortCircuitPrediction(lstmDetectionRef.current.lastPrediction);
         if (shortCircuit) {
           recognizedText = shortCircuit.text;
@@ -265,16 +284,19 @@ export function useSigningModeTranslation(
             '[SigningModeTranslation] LSTM short-circuit:',
             `${shortCircuit.originalText} (${(shortCircuit.confidence * 100).toFixed(1)}%)`
           );
+          dlog('lstm', `SHORT-CIRCUIT: ${shortCircuit.originalText} (${(shortCircuit.confidence * 100).toFixed(1)}%)`);
         } else {
           console.log('[SigningModeTranslation] Step 1: Gemini Sign Recognition');
           if (lstmHint) {
             console.log('[SigningModeTranslation] LSTM hint:', lstmHint);
           }
 
+          const geminiStartMs = Date.now();
           console.log('[SigningModeTranslation] Sending to Gemini:', {
             landmarkFrames: landmarkBufferRef.current.length,
             videoFrames: videoFrameBufferRef.current.length,
           });
+          dlog('gemini', `Sending: ${landmarkBufferRef.current.length} landmarks, ${videoFrameBufferRef.current.length} frames`);
 
           // Combine LSTM + gesture hints for Gemini context
           const combinedHint = [lstmHint, gestureHint].filter(Boolean).join('. ') || null;
@@ -295,11 +317,15 @@ export function useSigningModeTranslation(
             console.log('[SigningModeTranslation] Server applied correction:', geminiResult.originalText, '->', geminiResult.text);
           }
 
+          const geminiMs = Date.now() - geminiStartMs;
           if (!geminiResult.text) {
             console.log('[SigningModeTranslation] Unclear gesture - skipping audio');
+            dlog('gemini', `No result (${geminiMs}ms)`);
             recognizedText = '';
           } else {
             console.log('[SigningModeTranslation] Recognized:', recognizedText, '(source:', geminiResult.source, ')');
+            const corrInfo = recognizedCorrected ? ` [corrected from "${geminiResult.originalText}"]` : '';
+            dlog('gemini', `Result: "${recognizedText}" via ${geminiResult.source} (${geminiMs}ms)${corrInfo}`);
           }
         }
       } else {
@@ -331,29 +357,32 @@ export function useSigningModeTranslation(
       // Reset LSTM buffer for next sign
       lstmDetectionRef.current.reset();
 
-      // Step 1.5: Audio Synthesis - ElevenLabs TTS
-      // Skip audio for empty or unclear responses
+      // Step 1.5 + Step 2: Run TTS and gloss translation in parallel
+      // Audio plays in background — don't block on playback
       const isValidRecognition = recognizedText && recognizedText.trim().length > 0;
 
+      // Launch TTS in background (fire-and-forget playback)
       if (isValidRecognition) {
-        console.log('[SigningModeTranslation] Step 1.5: ElevenLabs Audio Synthesis');
-        try {
-          const audioResult = await synthesizeSpeech(recognizedText);
-          if (audioResult.success && audioResult.audioBlob) {
-            console.log('[SigningModeTranslation] Playing synthesized audio');
-            await playAudioBlob(audioResult.audioBlob);
-            console.log('[SigningModeTranslation] Audio playback complete');
-          } else {
-            console.log('[SigningModeTranslation] Audio synthesis failed:', audioResult.error);
-          }
-        } catch (audioError) {
-          console.error('[SigningModeTranslation] Audio error:', audioError);
-        }
+        console.log('[SigningModeTranslation] Step 1.5: ElevenLabs Audio Synthesis (background)');
+        synthesizeSpeech(recognizedText)
+          .then((audioResult) => {
+            if (audioResult.success && audioResult.audioBlob) {
+              console.log('[SigningModeTranslation] Playing synthesized audio (background)');
+              playAudioBlob(audioResult.audioBlob).catch((err) =>
+                console.error('[SigningModeTranslation] Audio playback error:', err)
+              );
+            } else {
+              console.log('[SigningModeTranslation] Audio synthesis failed:', audioResult.error);
+            }
+          })
+          .catch((audioError) => {
+            console.error('[SigningModeTranslation] Audio error:', audioError);
+          });
       } else {
         console.log('[SigningModeTranslation] Skipping audio for unclear recognition:', recognizedText);
       }
 
-      // Step 2: Translation - Gemini as "The Linguist" (convert English to ASL gloss)
+      // Step 2: Gloss translation (runs concurrently with TTS above)
       if (recognizedText && isGeminiConfigured) {
         console.log('[SigningModeTranslation] Step 2: Gemini Translation to Gloss');
         const geminiResult = await translateToGloss(recognizedText);
@@ -384,6 +413,7 @@ export function useSigningModeTranslation(
       setTranslation(result);
       setState('complete');
       completeCooldownRef.current = true; // Lock state during result display
+      completedAtRef.current = Date.now(); // Track when result was shown
 
       // Save to database (non-blocking)
       if (sessionId) {
@@ -402,6 +432,7 @@ export function useSigningModeTranslation(
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error('[SigningModeTranslation] Error:', msg);
+      dlog('error', msg);
       setTranslationError(msg);
       setTranslationRetryAfterUntil(null);
       setState('error');
@@ -417,8 +448,16 @@ export function useSigningModeTranslation(
     (result: LandmarkResult) => {
       if (isProcessingRef.current) return;
 
-      // During result display cooldown, ignore landmarks so user can read the result
-      if (completeCooldownRef.current) return;
+      // During result display cooldown, unlock early if user starts signing again
+      if (completeCooldownRef.current) {
+        if (result.hands && Date.now() - completedAtRef.current >= SIGNING_RESULT_MIN_DISPLAY_MS) {
+          console.log('[SigningModeTranslation] Hands detected during cooldown - unlocking input');
+          completeCooldownRef.current = false;
+          setState('idle');
+        } else {
+          return;
+        }
+      }
 
       const detector = motionDetectorRef.current;
       detector.update(result.hands);
@@ -455,6 +494,7 @@ export function useSigningModeTranslation(
           if (handsLostDuration >= confirmThreshold) {
             console.log('[SigningModeTranslation] Hands confirmed gone - triggering translation');
             console.log('[SigningModeTranslation] Buffers - Landmarks:', landmarkBufferRef.current.length, 'Video frames:', videoFrameBufferRef.current.length);
+            dlog('motion', `Hands gone → trigger (L:${landmarkBufferRef.current.length} V:${videoFrameBufferRef.current.length})`);
             handsLostTimeRef.current = null;
             triggerTranslation();
           }
@@ -482,8 +522,8 @@ export function useSigningModeTranslation(
       handsLostTimeRef.current = null;
       isCapturingRef.current = true; // Start independent frame capture
 
-      // Feed LSTM detection (if enabled)
-      if (lstmDetectionRef.current.isEnabled) {
+      // Feed LSTM detection (if enabled and LSTM pipeline is active)
+      if (LSTM_ENABLED && lstmDetectionRef.current.isEnabled) {
         lstmDetectionRef.current.processLandmarks(result.hands);
       }
 
@@ -501,9 +541,9 @@ export function useSigningModeTranslation(
         const videoFrame = captureVideoFrame(videoElementRef.current);
         if (videoFrame) {
           videoFrameBufferRef.current.push(videoFrame);
-          // Keep more frames for better temporal context (up to 60 frames)
-          if (videoFrameBufferRef.current.length > 60) {
-            videoFrameBufferRef.current = videoFrameBufferRef.current.slice(-60);
+          // Keep frames for temporal context (up to 24; only 8 sampled for Gemini)
+          if (videoFrameBufferRef.current.length > 24) {
+            videoFrameBufferRef.current = videoFrameBufferRef.current.slice(-24);
           }
         }
       }
@@ -563,6 +603,7 @@ export function useSigningModeTranslation(
             'Video frames:',
             videoFrameBufferRef.current.length
           );
+          dlog('motion', `Silence ${effectiveThreshold}ms → trigger (L:${landmarkBufferRef.current.length} V:${videoFrameBufferRef.current.length})${hasDynamicMotion ? ' [dynamic]' : ''}`);
           triggerTranslation();
         }
       } else {

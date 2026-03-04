@@ -23,7 +23,7 @@ import {
 import { supabase, isSupabaseConfigured } from '@/lib/supabase/client';
 
 export const runtime = 'nodejs';
-export const maxDuration = 10;
+export const maxDuration = 20;
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_VISION_URL =
@@ -41,7 +41,7 @@ function getProvider(): AIProvider {
   return 'none';
 }
 
-const SIGN_RECOGNIZE_TIMEOUT_MS = 9_000;
+const SIGN_RECOGNIZE_TIMEOUT_MS = 15_000;
 const SIGN_RECOGNIZE_PROMPT_VERSION = 1;
 const SIGN_RECOGNIZE_SAMPLE_BUCKET = 'sign-recognition-samples';
 
@@ -262,9 +262,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const persistedSampleId = await persistSignRecognitionSample(sessionId, frames, videoFrames);
-    const sampleId = persistedSampleId ?? undefined;
+    // Generate sampleId synchronously and persist in background (fire-and-forget)
+    // Persistence is for analytics only — AI never reads this data
+    const sampleId = crypto.randomUUID();
     trackingSampleId = sampleId;
+    persistSignRecognitionSample(sessionId, frames, videoFrames).catch((err) => {
+      console.warn('[SignRecognize API] Background sample persistence failed:', err);
+    });
 
     const provider = getProvider();
     trackingProvider = provider;
@@ -308,8 +312,12 @@ export async function POST(request: NextRequest) {
       sampledFrames.push(videoFrames[i]);
     }
 
+    const estimatedPayloadKB = Math.round(sampledFrames.reduce((sum, f) => sum + f.dataUrl.length, 0) / 1024);
+    console.log(`[SignRecognize API] Payload: ${sampledFrames.length} video frames (~${estimatedPayloadKB} KB), ${frames.length} landmark frames, prompt ${landmarkText.length} chars`);
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SIGN_RECOGNIZE_TIMEOUT_MS);
+    const aiStartTime = Date.now();
 
     try {
       let responseText = '';
@@ -433,6 +441,7 @@ export async function POST(request: NextRequest) {
         responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       }
 
+      console.log(`[SignRecognize API] AI response in ${Date.now() - aiStartTime}ms (provider: ${provider})`);
       const originalText = cleanGeminiResponseText(responseText);
       const baseSource = (videoFrames.length > 0 ? `${provider}-vision` : provider) as SignRecognizeResult['source'];
       const baseConfidence = videoFrames.length > 0 ? 0.9 : 0.75;
