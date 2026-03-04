@@ -7,6 +7,15 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    sequence: {
+      shuffle: false,
+    },
+    poolOptions: {
+      forks: {
+        singleFork: false,
+      },
+    },
+    fileParallelism: false,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

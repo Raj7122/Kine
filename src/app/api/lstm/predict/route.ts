@@ -189,12 +189,32 @@ async function loadModelFromDisk(): Promise<{ model: tf.LayersModel; vocabulary:
   return { model, vocabulary };
 }
 
+/**
+ * Non-recoverable errors from TF.js (partial load leaves global variable state)
+ * or registerAttentionLayer (class already registered). Retrying these would
+ * produce cascading "already registered" failures.
+ */
+function isTransientLoadError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  const permanent = [
+    'already registered',
+    'was already registered',
+    'Provided weight data has no target variable',
+  ];
+  return !permanent.some((p) => msg.includes(p));
+}
+
 async function getModelState(): Promise<{ model: tf.LayersModel; vocabulary: string[] }> {
   if (!modelStatePromise) {
     modelStatePromise = loadModelFromDisk().catch((error) => {
-      // Cache the failure permanently — retrying would hit "already registered"
-      // errors because TF.js keeps variable state from the partial load.
-      console.error('[LSTM API] Model loading failed permanently:', error.message);
+      if (isTransientLoadError(error)) {
+        // Transient error (e.g. file I/O, OOM) — clear cache so next call retries
+        console.warn('[LSTM API] Model loading failed (transient, will retry):', error.message);
+        modelStatePromise = null;
+      } else {
+        // Permanent error — cache failure to avoid cascading TF.js state issues
+        console.error('[LSTM API] Model loading failed permanently:', error.message);
+      }
       throw error;
     });
   }

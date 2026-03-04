@@ -456,6 +456,32 @@
 
 ---
 
+## 2026-03-04 — Destructive Testing & Resilience Sweep
+
+- **Goal**: Systematically break the application with negative, boundary, fuzz, chaos, and load tests to identify weaknesses and verify graceful degradation.
+- **Phase 1 — Negative & Boundary Tests**:
+  - `src/lib/sign-recognition/validation.destructive.test.ts` (56 tests): Oversized payloads, type confusion (string/number/boolean/null/undefined in every field), unicode edge cases (zero-width joiners, RTL marks, surrogate pairs), array boundary conditions (max±1 frames), prototype pollution (`__proto__`, `constructor`, `prototype` via `JSON.parse`), malformed `dataUrl` strings, circular references.
+  - `src/lib/sign-recognition/rateLimit.destructive.test.ts` (31 tests): Time manipulation (negative timestamps, `Number.MAX_SAFE_INTEGER`, clock going backwards), concurrent flood simulation (1000 rapid requests), key edge cases (empty string, unicode, 10KB keys, 1000 unique keys), limit boundaries (maxRequests=0/1, remaining count accuracy across expiry windows), `retryAfter` calculation precision, store cleanup behavior across time jumps.
+- **Phase 2 — Fuzz Tests**:
+  - `src/lib/sign-recognition/validation.fuzz.test.ts` (18 tests): Property-based testing with `fast-check`. Key properties: valid inputs always pass (1000 iterations), non-object inputs always fail (500 iterations), missing required fields always fail, oversized arrays always fail, invalid frame/videoFrame shapes always fail, sessionId/lstmHint edge cases. Crash-resistance property: 2000 arbitrary JSON-serializable inputs — **no crashes found**.
+- **Phase 3 — Load Test Scripts**:
+  - `load-tests/sign-recognize-load.js`: k6 script with 4 scenarios (load: 50 req/s × 2min, stress: ramp to 200 req/s, spike: 0→500 req/s burst, soak: 20 req/s × 10min). Targets both `/api/sign-recognize` and `/api/lstm/predict`. Thresholds: p95 < 5s, error rate < 10%.
+- **Phase 4 — Chaos / Failure Injection**:
+  - `src/app/api/lstm/predict/route.chaos.test.ts` (21 tests): File system failures (ENOENT, EACCES, missing shards), corrupted model files (invalid JSON, empty string, missing/empty `weightsManifest`), TF.js loading failures (`loadLayersModel` throws, "already registered" error, `predict` throws/returns null/empty), malformed request payloads (null/string/number landmarks, empty array, wrong feature count, `request.json()` throws, 10K frames, NaN/Infinity values). **All return proper HTTP error codes without crashing.**
+- **Infrastructure Fix**:
+  - `vitest.config.ts`: Added `fileParallelism: false` and fuzz test timeouts to prevent module singleton leakage between LSTM test files and fuzz test timeouts under full suite load.
+- **Findings**:
+  - Validation is solid — no crashes on 2000+ arbitrary inputs.
+  - Rate limiter handles all edge cases (clock manipulation, concurrent floods, prototype pollution keys).
+  - LSTM route degrades gracefully under all simulated failures.
+  - No prototype pollution vulnerabilities — Map-based rate limit store is immune.
+- **Tests**: 385 unit tests + 7 E2E tests passing.
+- **Dependencies Added**: `fast-check` (dev)
+- **Files Created**: `src/lib/sign-recognition/validation.destructive.test.ts`, `src/lib/sign-recognition/rateLimit.destructive.test.ts`, `src/lib/sign-recognition/validation.fuzz.test.ts`, `src/app/api/lstm/predict/route.chaos.test.ts`, `load-tests/sign-recognize-load.js`
+- **Files Modified**: `vitest.config.ts`, `package.json`, `package-lock.json`
+
+---
+
 ## Future Work
 
 - **Decay/recency weighting**: Older corrections should carry less weight than recent ones. Proposed approach: `effectiveCount = occurrenceCount * decayFactor` where `decayFactor = max(0.1, 1 - daysSinceLastSeen / 90)`. Deferred to a later date.
