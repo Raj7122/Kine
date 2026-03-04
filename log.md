@@ -426,6 +426,36 @@
 
 ---
 
+## 2026-03-03 — Branch Refactor & Cleanup
+
+- **Goal**: Remove dead code, orphan artifacts, and fix lint errors across the codebase.
+- **Refactoring**:
+  - **Removed 26 orphan model shard files** (`group1-shard*of9.bin`, `group1-shard*of17.bin`) — ~96 MB of dead weight from previous TF.js exports. Only the referenced `of5` set remains.
+  - **Removed `isUsingAPIFallback` export** from `lstmService.ts` — unused by any consumer.
+  - **Removed `resetAttentionLayerRegistration` export** from `attentionLayer.ts` — unused.
+  - **Removed browser debug utilities** from `lstmService.ts` (`window.testLSTMInference`, `getLSTMState`, `loadLSTMModel`, `disposeLSTMModel`, `getLSTMModelMetadata`).
+  - **Removed window debug bindings** from `useSigningModeTranslation.ts` (`window.enableLSTM`, `window.disableLSTM`, `window.getLSTMState`).
+- **ESLint Fixes**:
+  - `DebugOverlay.tsx`: Fixed conditional `useMemo` hook (moved early return after hook call).
+  - `SubtitleOverlay.tsx`: Fixed `setState` in effect — added `useRef` guard to prevent duplicate entries.
+  - `MetricsDashboard.tsx`: Wrapped `fetchData` in `useCallback` to fix missing dependency warning.
+  - Removed unused imports: `ArrowRight`/`SessionRow` (HistoryModal), `genASLClient`/`GenASLTranslateRequest` (GenASLPlayer).
+  - Prefixed unused vars with `_`: `_request` (corrections route), `_landmarkText` (OpenAI route), `_isFallback` (AvatarPlayer).
+- **LSTM Model Loading Fix**:
+  - **Weight name mismatch**: Keras 3 exports weight names that don't match TF.js internal variable names. Discovered all 12 mismatched names via debug script and applied comprehensive remapping:
+    - `conv1d/*` → `td_conv1d/*` (TimeDistributed wrapper prefix)
+    - `batch_normalization/*` → `td_batch_norm/*` (TimeDistributed wrapper prefix)
+    - `forward_lstm/lstm_cell/*` → `bidirectional/forward_forward_lstm/*` (Bidirectional prefixes + LSTM cell flattening)
+    - `backward_lstm/lstm_cell/*` → `bidirectional/backward_forward_lstm/*`
+  - Fixed in both `model.json` files and added defensive remapping in API route `loadModelFromDisk()`.
+  - **AttentionLayer rank error**: `tf.dot` only supports rank 1-2 tensors, but BiLSTM output is rank 3 `[batch, timesteps, features]`. Replaced with `tf.matMul` (batch-aware) and `tf.einsum('btd,d->bt')` for the context vector dot product.
+  - **Model caching**: Changed `getModelState()` to cache failures permanently — retrying after partial load hits "variable already registered" errors due to TF.js global state.
+- **Tests**: 259 unit tests + 7 E2E tests passing. TypeScript compiles clean (`tsc --noEmit`).
+- **Files Modified**: `src/lib/lstm/lstmService.ts`, `src/lib/lstm/attentionLayer.ts`, `src/hooks/useSigningModeTranslation.ts`, `src/components/ui/DebugOverlay.tsx`, `src/components/ui/SubtitleOverlay.tsx`, `src/components/feedback/MetricsDashboard.tsx`, `src/components/avatar/GenASLPlayer.tsx`, `src/components/avatar/AvatarPlayer.tsx`, `src/components/modals/HistoryModal.tsx`, `src/app/api/feedback/corrections/route.ts`, `src/app/api/openai/recognize/route.ts`, `src/app/api/lstm/predict/route.ts`, `public/models/asl_cnn_lstm_25/model.json`, `public/models/asl_cnn_lstm_25.json`
+- **Files Deleted**: 26 orphan `.bin` shard files in `public/models/asl_cnn_lstm_25/`
+
+---
+
 ## Future Work
 
 - **Decay/recency weighting**: Older corrections should carry less weight than recent ones. Proposed approach: `effectiveCount = occurrenceCount * decayFactor` where `decayFactor = max(0.1, 1 - daysSinceLastSeen / 90)`. Deferred to a later date.

@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { videoFrames, landmarkText, lstmHint } = body;
+    const { videoFrames, landmarkText: _landmarkText, lstmHint } = body;
 
     // Build messages array with images
     const content: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [];

@@ -123,7 +123,29 @@ async function loadModelFromDisk(): Promise<{ model: tf.LayersModel; vocabulary:
       shardPaths.push(...group.paths);
     }
     if (Array.isArray(group.weights)) {
-      weightSpecs.push(...group.weights);
+      // Remap Keras 3 weight names → TF.js internal names.
+      // Keras 3 exports differ from what TF.js topology creates:
+      //   conv1d/* → td_conv1d/* (TimeDistributed wrapper)
+      //   batch_normalization/* → td_batch_norm/* (TimeDistributed wrapper)
+      //   forward_lstm/lstm_cell/* → bidirectional/forward_forward_lstm/*
+      //   backward_lstm/lstm_cell/* → bidirectional/backward_forward_lstm/*
+      const KERAS3_REMAP: [string, string][] = [
+        ['conv1d/', 'td_conv1d/'],
+        ['batch_normalization/', 'td_batch_norm/'],
+        ['bidirectional/forward_lstm/lstm_cell/', 'bidirectional/forward_forward_lstm/'],
+        ['bidirectional/backward_lstm/lstm_cell/', 'bidirectional/backward_forward_lstm/'],
+        ['forward_lstm/lstm_cell/', 'bidirectional/forward_forward_lstm/'],
+        ['backward_lstm/lstm_cell/', 'bidirectional/backward_forward_lstm/'],
+      ];
+      const remapped = group.weights.map((w: tf.io.WeightsManifestEntry) => {
+        for (const [src, dst] of KERAS3_REMAP) {
+          if (w.name.startsWith(src)) {
+            return { ...w, name: dst + w.name.slice(src.length) };
+          }
+        }
+        return w;
+      });
+      weightSpecs.push(...remapped);
     }
   }
 
@@ -161,6 +183,7 @@ async function loadModelFromDisk(): Promise<{ model: tf.LayersModel; vocabulary:
   };
 
   const model = await tf.loadLayersModel(ioHandler);
+
   const vocabulary = await readMetadataVocabulary();
 
   return { model, vocabulary };
@@ -169,7 +192,9 @@ async function loadModelFromDisk(): Promise<{ model: tf.LayersModel; vocabulary:
 async function getModelState(): Promise<{ model: tf.LayersModel; vocabulary: string[] }> {
   if (!modelStatePromise) {
     modelStatePromise = loadModelFromDisk().catch((error) => {
-      modelStatePromise = null;
+      // Cache the failure permanently — retrying would hit "already registered"
+      // errors because TF.js keeps variable state from the partial load.
+      console.error('[LSTM API] Model loading failed permanently:', error.message);
       throw error;
     });
   }

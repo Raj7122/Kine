@@ -100,7 +100,7 @@ export function AvatarPlayer({
     currentGloss,
     currentIndex,
     totalItems,
-    isFallback,
+    isFallback: _isFallback,
     playSequence,
     stop,
     onItemComplete,

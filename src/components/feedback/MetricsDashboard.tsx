@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Minus, RefreshCw, AlertCircle } from 'lucide-react';
 
@@ -31,7 +31,7 @@ export function MetricsDashboard({ className = '' }: MetricsDashboardProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
 
@@ -56,11 +56,11 @@ export function MetricsDashboard({ className = '' }: MetricsDashboardProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [period]);
 
   useEffect(() => {
     fetchData();
-  }, [period]);
+  }, [fetchData]);
 
   const getTrendIcon = (trend: AccuracyStats['trend']) => {
     switch (trend) {

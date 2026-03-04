@@ -50,9 +50,11 @@ export function registerAttentionLayer(tf: TFModule): void {
         const b = (this.b as any).read();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const u = (this.u as any).read();
-        const projected = tf.add(tf.dot(input, W), b);
+        // input: [batch, timesteps, features], W: [features, units] → matMul handles batch
+        const projected = tf.add(tf.matMul(input, W), b);
         const uIt = tf.tanh(projected);
-        const aIt = tf.dot(uIt, u);
+        // uIt: [batch, timesteps, units], u: [units] → use einsum for batched vector dot
+        const aIt = tf.einsum('btd,d->bt', uIt, u);
         const alpha = tf.softmax(aIt, -1);
         const expanded = tf.expandDims(alpha, -1);
         return tf.sum(tf.mul(input, expanded), 1);
@@ -81,7 +83,3 @@ export function registerAttentionLayer(tf: TFModule): void {
   registered = true;
 }
 
-/** Reset registration state (for tests that reset modules). */
-export function resetAttentionLayerRegistration(): void {
-  registered = false;
-}

@@ -626,25 +626,6 @@ export function useSigningModeTranslation(
     setIsDynamicModeActive(false);
   }, [lstmDetection]);
 
-  // Expose debug functions to window
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const win = window as unknown as {
-        enableLSTM: () => Promise<void>;
-        disableLSTM: () => void;
-        getLSTMState: () => { isEnabled: boolean; hasDynamicSign: boolean; motionFrames: number };
-      };
-
-      win.enableLSTM = enableLSTM;
-      win.disableLSTM = disableLSTM;
-      win.getLSTMState = () => ({
-        isEnabled: lstmDetection.isEnabled,
-        hasDynamicSign: lstmDetection.hasPendingDynamicSign(),
-        motionFrames: lstmDetection.getMotionFrameCount(),
-      });
-    }
-  }, [enableLSTM, disableLSTM, lstmDetection]);
-
   return {
     // Translation state
     state,

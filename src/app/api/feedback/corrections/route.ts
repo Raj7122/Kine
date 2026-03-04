@@ -26,7 +26,7 @@ export async function GET() {
   return NextResponse.json({ corrections: data ?? [] });
 }
 
-export async function DELETE(request: NextRequest) {
+export async function DELETE(_request: NextRequest) {
   if (!isSupabaseConfigured || !supabase) {
     return NextResponse.json({ message: 'Supabase not configured' }, { status: 503 });
   }

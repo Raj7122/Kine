@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, MessageSquare, ArrowRight, Trash2, Clock } from 'lucide-react';
+import { X, MessageSquare, Trash2, Clock } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import type { MessageRow, SessionRow } from '@/lib/supabase/types';
+import type { MessageRow } from '@/lib/supabase/types';
 
 interface HistoryModalProps {
   isOpen: boolean;

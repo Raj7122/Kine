@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAppStore } from '@/store/useAppStore';
 import type { TranslationState } from '@/hooks/useSigningModeTranslation';
@@ -27,16 +27,25 @@ export function SubtitleOverlay({
 }: SubtitleOverlayProps) {
   const { lastTranslation } = useAppStore();
   const [history, setHistory] = useState<SubtitleEntry[]>([]);
+  const lastSeenRef = useRef<unknown>(null);
 
-  // Add new translation to history
+  // Add new translation to history (guarded by ref to prevent duplicates)
   useEffect(() => {
-    if (lastTranslation && translationState === 'complete') {
-      const newEntry: SubtitleEntry = {
-        id: crypto.randomUUID(),
-        text: typeof lastTranslation === 'string' ? lastTranslation : lastTranslation?.text ?? '',
-        timestamp: Date.now(),
-      };
-      setHistory((prev) => [newEntry, ...prev].slice(0, maxHistory));
+    if (
+      lastTranslation &&
+      translationState === 'complete' &&
+      lastTranslation !== lastSeenRef.current
+    ) {
+      lastSeenRef.current = lastTranslation;
+      const text = typeof lastTranslation === 'string' ? lastTranslation : lastTranslation?.text ?? '';
+      if (text) {
+        const newEntry: SubtitleEntry = {
+          id: crypto.randomUUID(),
+          text,
+          timestamp: Date.now(),
+        };
+        setHistory((prev) => [newEntry, ...prev].slice(0, maxHistory));
+      }
     }
   }, [lastTranslation, translationState, maxHistory]);
 

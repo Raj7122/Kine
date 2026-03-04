@@ -3,9 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  genASLClient,
   type GenASLVideoResult,
-  type GenASLTranslateRequest,
 } from '@/lib/aws/genASLService';
 import { isGenASLConfigured, GENASL_AVATAR_SETTINGS } from '@/lib/aws/config';
 
